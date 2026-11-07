@@ -53,6 +53,8 @@ The initial milestone will use only project-maintained recipes, with dependencie
 
 KPB will be implemented in Rust. The first functional milestone will validate a project recipe, resolve a small dependency chain, and produce an artifact in staging, without installing it into the system.
 
+The [initial build environment](docs/build-environment.md) uses the fixed `/opt/kpb` prefix and a read-only dependency tree per build inside Bubblewrap. The current package writes to separate staging under `$pkgdir/opt/kpb`; this does not create or populate `/opt/kpb` on the host.
+
 Nix is approved as a temporary source of build tools and inputs that project recipes cannot yet provide, including the initial compiler needed to bootstrap a toolchain. This is a development decision, not an implemented integration.
 
 The temporary bootstrap must follow these rules:
@@ -99,7 +101,7 @@ Optional `prepare()`, `build()`, and `check()` functions precede mandatory `pack
 
 The Rust implementation will orchestrate validation, dependency resolution, source acquisition and verification, and stage execution. Build functions remain untrusted executable code; Bash error options do not provide filesystem isolation or detect every failed command.
 
-This format and execution contract are approved requirements, not implemented functionality. No recipe parser or executor exists yet. Isolation, prefix defaults, bootstrap configuration, and artifact format remain separate decisions.
+This format and execution contract are approved requirements, not implemented functionality. No recipe parser or executor exists yet. The fixed prefix and build environment are defined in [docs/build-environment.md](docs/build-environment.md). Detailed sandbox policy, bootstrap configuration, runtime validation, and artifact format remain separate decisions.
 
 The project should favor readability, maintainability, and predictable behavior.
 
@@ -141,6 +143,8 @@ The PackageKit integration will provide information that helps the KPB resolver 
 However, PackageKit is not responsible for resolving the complete dependency graph of KPB recipes.
 
 The initial recipe syntax supports package names and exact `pkgver` constraints as defined in [docs/recipes.md](docs/recipes.md). Provider mapping, version ordering and ranges, and ABI compatibility require further design.
+
+For each initial build, compose direct runtime/build dependencies, enabled test dependencies, and the runtime dependencies needed by those packages from validated artifacts. Do not automatically carry over their own build-only dependencies. Allow one version per name, reject conflicting requirements and file contributions, and retain ownership information. The tree is read-only at `/opt/kpb`, separate from current staging and temporary Nix tools; discovery uses the explicit environment in [docs/build-environment.md](docs/build-environment.md), with no fallback to user paths or undeclared host packages.
 
 Automatic installation of missing dependencies through the host package manager is not an established requirement.
 
@@ -303,7 +307,7 @@ Possible stages:
 
 This workflow is a **design proposal**, not a statement of implemented functionality.
 
-The package artifact format, installation prefix, filesystem layout, and rollback strategy remain open questions.
+The initial build prefix is `/opt/kpb`, with separate staging and a read-only dependency tree as specified in [docs/build-environment.md](docs/build-environment.md). Artifact archive format, future host installation layout, and rollback strategy remain open questions.
 
 ### 11. Coexistence With Native Package Managers
 
@@ -317,12 +321,12 @@ A critical challenge is avoiding filesystem ownership conflicts.
 
 Potential strategies include:
 
-- A dedicated installation prefix for KPB-managed software.
-- Configurable installation prefixes.
+- A dedicated prefix for KPB-managed software; `/opt/kpb` is selected for initial sandbox builds and staging.
+- Configurable installation prefixes in a future milestone.
 - File ownership checks before installation.
 - Explicit conflict detection against the host package database.
 
-The final installation layout has not been selected.
+The future host installation layout has not been selected. The initial build-time prefix does not authorize writes to the host's `/opt/kpb` or promise relocation of artifacts.
 
 KPB should not assume that PackageKit alone provides sufficient information to prevent every filesystem conflict.
 
@@ -370,7 +374,7 @@ KPB should eventually provide safeguards for:
 
 Security is an architectural requirement, not a feature to be postponed until the project becomes mature.
 
-The exact sandboxing and transaction mechanisms remain undecided.
+Bubblewrap is the selected basis for build isolation, with read-only dependencies, no network in recipe functions, and no implicit exposure of user data or host dependencies. KPB must stop if the required boundary cannot be established. The [build environment specification](docs/build-environment.md#isolation-boundary) records these approved requirements. Detailed sandbox configuration and transaction mechanisms remain undecided.
 
 ### 14. Future Possibilities
 
@@ -409,7 +413,7 @@ The following future architectural direction remains established:
 
 However, this integration has not yet been validated as part of a completed KPB implementation.
 
-Rust is the selected implementation language. The approved initial recipe format and execution contract are documented in [docs/recipes.md](docs/recipes.md). Neither is implemented yet. The Rust edition and toolchain, parser implementation, database engine, installation layout, and remaining implementation architecture are still undecided.
+Rust is the selected implementation language. The approved recipe format is documented in [docs/recipes.md](docs/recipes.md), and the prefix, dependency composition, discovery environment, and Bubblewrap direction in [docs/build-environment.md](docs/build-environment.md). These remain unimplemented requirements. The Rust edition and toolchain, parser implementation, detailed sandbox policy, bootstrap configuration, runtime validation mechanism, database engine, future host installation layout, and remaining implementation architecture are still undecided.
 
 Existing source code, when available, should be examined before making implementation decisions.
 
@@ -426,10 +430,10 @@ The following questions require explicit decisions:
 7. Which PackageKit capabilities are strictly required for the first host integration milestone?
 8. Should PackageKit be an optional or required runtime dependency once host integration is introduced?
 9. Which host distribution should be tested first?
-10. Where should KPB-managed packages be installed?
-11. Should installation prefixes be configurable?
+10. What future host installation layout should be used for artifacts initially built for `/opt/kpb`?
+11. How should future prefix configurability work beyond the fixed initial `/opt/kpb` prefix?
 12. What database technology should be used?
-13. How should builds be isolated?
+13. What detailed Bubblewrap mount layout, per-stage permissions, environment allowlist, and resource limits should enforce the approved isolation boundary?
 14. What guarantees should installation and removal provide?
 15. How should KPB detect host-owned filesystem conflicts?
 16. Should KPB generate reusable package artifacts?

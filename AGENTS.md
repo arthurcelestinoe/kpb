@@ -35,6 +35,8 @@ These are overall project goals. The initial milestone uses only project-maintai
 
 Rust is the selected implementation language. The first functional milestone is recipe validation, resolution of a small dependency chain, and artifact production in staging, without installation into the system. The Rust edition and toolchain are not yet selected.
 
+Follow [docs/build-environment.md](docs/build-environment.md) for the fixed `/opt/kpb` prefix, per-build dependency tree, discovery settings, and Bubblewrap isolation direction. These are approved requirements, not implemented functionality or authorization to create or populate the host's `/opt/kpb`.
+
 KPB is **not intended to become a Gentoo clone** or to rebuild the entire host distribution.
 
 Avoid expanding the scope toward full distribution management unless explicitly requested.
@@ -141,6 +143,8 @@ KPB is responsible for resolving dependencies declared by its recipes.
 
 In the initial milestone, resolve dependencies through project recipes, with only the explicit temporary build and bootstrap exceptions described in section 3.1. Nix must not replace KPB's dependency resolver or provide runtime dependencies for final packages.
 
+Compose validated direct runtime/build dependencies, enabled test dependencies, and their required transitive runtime dependencies into one read-only tree per build. Do not propagate dependencies used only to build an already completed dependency. Allow one version per package name; reject incompatible requirements and file/link/type collisions without automatic alternative builds or silent overwrites. Shared directories may be merged while retaining contributor ownership. Keep temporary bootstrap tools and current staging separate from this tree.
+
 In future host integration, PackageKit acts as a source of host package information, not as a replacement for KPB's dependency resolver.
 
 Agents must distinguish:
@@ -170,7 +174,9 @@ Agents must:
 - Run defined tests by default; when explicitly disabled, skip `check()` and resolution of `checkdepends`. Reject `checkdepends` without `check()`.
 - Make `package()` write to the staging directory supplied by KPB, rather than install into the host system.
 - Keep validation, dependency resolution, source acquisition and verification, and build orchestration in the Rust implementation.
-- Treat the specification as approved requirements, not an implemented parser or executor. Isolation mechanisms, prefix defaults, bootstrap configuration, and artifact format remain separate decisions.
+- Supply `prefix=/opt/kpb` and keep package output under `$pkgdir/opt/kpb`. Do not incorporate current staging into its own dependency tree or promise relocatable artifacts.
+- Use the discovery settings in [docs/build-environment.md](docs/build-environment.md#discovery-environment): KPB tools first, explicit bootstrap tools only, pkg-config and CMake paths under `/opt/kpb`, and no inherited user PATH or automatic compiler/linker flags or `LD_LIBRARY_PATH`.
+- Treat the specifications as approved requirements, not implemented components. Detailed Bubblewrap policy, bootstrap configuration, runtime validation, artifact format, and future host installation layout remain separate decisions.
 
 Recipes must be treated as untrusted input, and their build functions as **untrusted executable instructions**. Project-maintained recipes are subject to the same precautions.
 
@@ -187,6 +193,8 @@ Agents must consider:
 Never assume that a Git repository or recipe is trustworthy merely because it is publicly accessible.
 
 Avoid executing arbitrary recipe code with elevated privileges.
+
+Bubblewrap is the selected isolation basis. Expose dependencies read-only, deny network access to recipe functions, restrict writes to workspace/staging/private temporary directories, and exclude user home contents, credentials, and session sockets. Do not expose host directories or libraries as implicit dependencies. Check effective isolation support; if the required boundary is unavailable, stop with a diagnostic instead of running without protection. Detailed mounts and per-stage permissions remain to be specified.
 
 ## 7. Installation and Removal Safety
 
@@ -237,6 +245,7 @@ Important test scenarios include:
 - Interrupted installations.
 - Invalid recipes.
 - Parser and executor scenarios specified in [docs/recipes.md](docs/recipes.md#future-implementation-validation), when those components are implemented.
+- Dependency composition, discovery, prefix, and isolation scenarios specified in [docs/build-environment.md](docs/build-environment.md#future-implementation-validation), when those components are implemented.
 - Unavailable Git repositories.
 - Missing Nix when an explicit bootstrap input requires it.
 - Preservation of user profiles, shell configuration, and host-managed packages during Nix-assisted builds.

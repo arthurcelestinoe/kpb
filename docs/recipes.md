@@ -61,6 +61,8 @@ Exact matching compares `pkgver` as text, excluding `pkgrel`: `1.2` and `1.2.0` 
 
 `depends` records runtime requirements that must also be available during the build. `makedepends` adds build-only requirements, and `checkdepends` adds requirements only when `check()` will run. Dependency roles must remain distinguishable when the same package serves multiple roles. The initial resolver uses project recipes, with explicitly configured build/bootstrap exceptions outside the recipe format.
 
+The [initial build environment](build-environment.md) composes these dependencies and their required runtime closure into a read-only tree at `/opt/kpb`. Build-only dependencies used to produce a completed dependency are not automatically propagated to its consumer. Each tree allows one version per name and rejects incompatible requirements and conflicting file contributions.
+
 ## Sources and integrity
 
 KPB must obtain all declared sources and verify all corresponding hashes before executing any recipe function. Both downloaded and local files require hashes; `SKIP` is not supported. A missing file, download failure, checksum mismatch, or list length mismatch stops the operation.
@@ -85,9 +87,11 @@ Each stage receives validated metadata and scalar auxiliaries as Bash variables,
 | `srcdir` | Verified files and extracted sources; initial working directory for every stage. |
 | `builddir` | Separate workspace for out-of-tree builds. |
 | `pkgdir` | Staging root, empty at the start of the build sequence. |
-| `prefix` | Intended installation prefix supplied by build configuration. |
+| `prefix` | Fixed at `/opt/kpb` in the initial milestone. |
 
-The default prefix and installation layout remain undecided. `prefix` describes the eventual destination; it is not a directory into which a recipe may directly install. For a build system honoring `DESTDIR`, `make DESTDIR="$pkgdir" install` stages files configured for `$prefix` under `$pkgdir`.
+`prefix` describes the intended destination inside the sandbox, not a directory into which a recipe may directly install. For a build system honoring `DESTDIR`, `make DESTDIR="$pkgdir" install` stages files under `$pkgdir/opt/kpb`. Current staging remains separate from the read-only dependency tree during the build. KPB will not create or populate the host's `/opt/kpb` in this milestone. Artifacts are bound to this prefix without a relocation guarantee; prefix configurability and future host installation layout are deferred.
+
+The [build environment contract](build-environment.md#discovery-environment) also defines PATH, pkg-config, and CMake discovery. It does not inherit the user's PATH, add automatic compiler/linker flags, or supply `LD_LIBRARY_PATH`. Required recipe-specific adjustments must be explicit.
 
 The sequence is:
 
@@ -122,7 +126,7 @@ These options follow Bash semantics; they do not detect every failed command. In
 
 The Rust implementation orchestrates validation, dependency resolution, source acquisition and verification, and stage execution. Reading metadata never executes recipe code; stage execution still runs untrusted code, including for project-maintained recipes.
 
-`package()` must write only into staging. This is a recipe contract, not a claim that a shell process enforces filesystem confinement. Build isolation, filesystem access enforcement, network policy, and privilege separation remain separate design decisions. Nix development environments alone do not establish a security sandbox. Builds must preserve user profiles, shell configuration, and host-managed packages.
+`package()` must write only into staging. This is a recipe contract, not a claim that a shell process enforces filesystem confinement. Bubblewrap is the selected isolation basis, with the required boundary described in [the build environment specification](build-environment.md#isolation-boundary). Detailed mounts, per-stage permissions, and enforcement remain to be designed. Nix development environments alone do not establish a security sandbox. Builds must preserve user profiles, shell configuration, and host-managed packages.
 
 Final artifact validation must examine runtime dependencies, including interpreters, libraries, and Nix store references. Using a Nix compiler does not ensure runtime independence. An artifact whose independence from Nix cannot be demonstrated is not a valid final package for the initial milestone.
 
@@ -172,7 +176,7 @@ Both `check()` and `package()` enter `$builddir` again because they do not inher
 
 ### Local source without compilation
 
-Place a file named `message.txt` beside `KPB.recipe`, containing exactly `KPB example` followed by one LF newline, with no BOM or other bytes. Its SHA-256 is the value below. This example stages data only, omits all optional functions and dependencies, and does not choose a system-wide prefix.
+Place a file named `message.txt` beside `KPB.recipe`, containing exactly `KPB example` followed by one LF newline, with no BOM or other bytes. Its SHA-256 is the value below. This example stages data only under `$pkgdir/opt/kpb`, omits all optional functions and dependencies, and performs no installation into the host.
 
 ```bash
 pkgname=example-data
@@ -207,4 +211,4 @@ These are required scenarios for a future parser and executor, not existing or e
 - Verify stage and pipeline failures stop execution; cover conditional `errexit` exceptions rather than promising unconditional failure detection.
 - Verify staging-only packaging under the chosen isolation mechanism, preservation of the user's environment, and rejection of final artifacts with Nix runtime dependencies or unverified independence.
 
-The source format and execution contract are approved here. Parser implementation, isolation mechanisms, prefix defaults, bootstrap configuration, artifact format, and executor CLI design require further implementation decisions.
+The source format and execution contract are approved here. The fixed prefix, dependency composition, discovery settings, and Bubblewrap isolation direction are specified in [build-environment.md](build-environment.md), including additional future validation scenarios. Parser implementation, detailed sandbox policy, bootstrap configuration, runtime validation mechanism, artifact format, and executor CLI design require further implementation decisions.
