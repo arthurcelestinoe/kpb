@@ -47,6 +47,30 @@ KPB is intended to support:
 
 The initial focus is on Linux distributions that already have a functioning native package manager.
 
+#### 3.1 Initial milestone: project recipes and temporary Nix bootstrap
+
+The initial milestone will use only project-maintained recipes, with dependencies supplied by those recipes. Host package discovery through PackageKit is deferred to a later milestone; it remains the preferred direction for future host integration.
+
+KPB will be implemented in Rust. The first functional milestone will validate a project recipe, resolve a small dependency chain, and produce an artifact in staging, without installing it into the system.
+
+Nix is approved as a temporary source of build tools and inputs that project recipes cannot yet provide, including the initial compiler needed to bootstrap a toolchain. This is a development decision, not an implemented integration.
+
+The temporary bootstrap must follow these rules:
+
+- Require Nix to be already installed when needed. KPB must not install or configure it automatically, and must provide an actionable diagnostic if it is unavailable.
+- Preserve user profiles, shell configuration, and host-managed packages. Downloads and writes to the Nix store and caches are permitted.
+- Make Nix-supplied tools available only to the build process, without persistent changes to the user's environment.
+- Keep recipes and KPB's dependency resolver independent of Nix. Declare exceptions explicitly in bootstrap configuration, without automatically translating recipe names into Nix package names. The configuration format remains undecided.
+- Allow Nix dependencies only for build and bootstrap, not as runtime dependencies of final packages.
+
+Before accepting a final artifact, validate its runtime dependencies, including interpreters, libraries, and references to Nix store paths. Building with a Nix compiler does not guarantee an artifact independent of Nix. If runtime independence from Nix cannot be demonstrated, the artifact must not be accepted as a valid final package for this milestone.
+
+Record each temporary Nix dependency and its justification. Replace it when a validated chain of project recipes can perform the same role. Removing Nix is the goal, but eliminating every external bootstrap input is not guaranteed: the initial compiler remains an explicit requirement until an alternative is defined.
+
+Nix development environments can supply tools to a build command, but this alone does not establish a security sandbox. Build isolation remains a separate design decision. See the [official Nix development environment documentation](https://nix.dev/manual/nix/latest/command-ref/new-cli/nix3-develop).
+
+Future implementation validation must cover missing Nix, preservation of profiles and shell configuration, explicit bootstrap exceptions, rejection of final artifacts with Nix runtime dependencies, and replacement of a Nix tool with a project recipe.
+
 ### 4. What KPB Is Not
 
 KPB is not intended to be:
@@ -65,7 +89,15 @@ The letter **K** in Kobalt is a naming choice, not a requirement for KDE integra
 
 Recipes describe how software is obtained, built, and prepared for installation.
 
-A future recipe format may include:
+The approved direction is a single-file, hybrid format inspired by Arch PKGBUILDs and BSD ports, with limited metadata and shell functions for build steps. It is a KPB-specific format; compatibility with existing PKGBUILDs is not assumed.
+
+Metadata will use variable assignments and lists with Bash-like syntax, restricted so KPB can read and validate them without executing commands. Arbitrary shell logic and command execution are not permitted in metadata. Allowed substitutions remain to be defined.
+
+Shell functions will express steps such as `prepare()`, `build()`, `check()`, and `package()`. The `package()` step must write to the staging directory supplied by KPB, rather than install into the host system. Required functions, their exact contracts, and the shell interpreter remain undecided.
+
+The Rust implementation will orchestrate metadata validation, dependency resolution, source acquisition and verification, and execution of build steps. Metadata inspection must not execute or source the recipe as a shell script. Build functions remain untrusted executable code.
+
+Potential metadata and build information includes:
 
 - Package name and version.
 - Description and license.
@@ -79,7 +111,7 @@ A future recipe format may include:
 - Installation and staging instructions.
 - Optional features or build variants.
 
-The exact recipe syntax and execution model are **not yet finalized**.
+The single-file hybrid model is approved, but its exact grammar, required fields, permitted substitutions, filename, and execution contracts are **not yet finalized**. No recipe parser or executor is implemented yet.
 
 The project should favor readability, maintainability, and predictable behavior.
 
@@ -103,7 +135,7 @@ The initial repository layout and synchronization behavior remain to be defined.
 
 KPB is responsible for resolving dependencies required for building and running software.
 
-A key design principle is **host dependency reuse**.
+A key design principle for future host integration is **host dependency reuse**. The initial milestone instead uses project recipes and the temporary build-only bootstrap described in section 3.1.
 
 For example, if a package requires a compatible version of OpenSSL and the host distribution already provides it, KPB should be able to recognize and reuse that installation.
 
@@ -132,7 +164,7 @@ KPB adopts **PackageKit as its preferred integration layer for host package disc
 
 PackageKit provides a D-Bus API that abstracts capabilities of several native Linux package managers through distribution-specific backends.
 
-Instead of implementing direct integrations with every supported distribution, KPB should initially use PackageKit to query host package information.
+When host integration is introduced after the initial milestone, KPB should use PackageKit to query host package information instead of implementing direct integrations with every supported distribution.
 
 Relevant capabilities include:
 
@@ -145,7 +177,7 @@ Relevant capabilities include:
 
 These operations are backend-dependent and cannot be assumed to work universally.
 
-The first implementation should prioritize read-only access.
+The first host integration implementation should prioritize read-only access.
 
 Package installation and removal performed by KPB itself will remain under KPB's own package management subsystem.
 
@@ -243,7 +275,7 @@ The database should eventually record information such as:
 
 Dependencies supplied by the host must be distinguishable from dependencies installed by KPB.
 
-For example:
+For example, in a future milestone with host integration:
 
 ```text
 Package: example
@@ -272,7 +304,7 @@ A proposed model separates package construction from system installation.
 Possible stages:
 
 1. Retrieve and validate the recipe.
-2. Resolve dependencies, including host-provided dependencies.
+2. Resolve dependencies through project recipes and explicit temporary bootstrap inputs; include host-provided dependencies in a future host integration milestone.
 3. Obtain and verify source code.
 4. Prepare the build environment.
 5. Compile the software.
@@ -377,13 +409,19 @@ The initial concept and prototype work began during experimentation with an AI c
 
 The project is expected to continue through AI-assisted development under human review.
 
-The following architectural direction has been established:
+The following initial milestone has been approved:
+
+**Use project-maintained recipes and their dependencies, with Nix supplying explicit temporary build and bootstrap inputs only, as described in section 3.1.**
+
+No build or bootstrap integration is implemented yet. This milestone does not implement PackageKit integration.
+
+The following future architectural direction remains established:
 
 **KPB should prefer PackageKit for host package discovery while retaining an internal provider abstraction that permits native integrations when necessary.**
 
 However, this integration has not yet been validated as part of a completed KPB implementation.
 
-No programming language, recipe syntax, database engine, installation layout, or definitive implementation architecture is established by this document.
+Rust is the selected implementation language. The approved recipe direction is the single-file hybrid format described in section 5. Neither decision is implemented yet. The Rust edition and toolchain, exact recipe syntax, database engine, installation layout, and remaining implementation architecture are still undecided.
 
 Existing source code, when available, should be examined before making implementation decisions.
 
@@ -391,14 +429,14 @@ Existing source code, when available, should be examined before making implement
 
 The following questions require explicit decisions:
 
-1. Which programming language and runtime should KPB use?
-2. What should the recipe format look like?
-3. Should recipes be executable scripts, structured data, or a hybrid?
+1. Which Rust edition and toolchain should KPB use?
+2. What exact recipe grammar, filename, required fields, and metadata substitutions should KPB support?
+3. Which shell interpreter and build function contracts should the approved hybrid format use?
 4. How should Git repositories organize recipes?
 5. How should dependency providers and versions be represented?
 6. How should PackageKit results be normalized?
-7. Which PackageKit capabilities are strictly required for initial support?
-8. Should PackageKit be an optional or required runtime dependency?
+7. Which PackageKit capabilities are strictly required for the first host integration milestone?
+8. Should PackageKit be an optional or required runtime dependency once host integration is introduced?
 9. Which host distribution should be tested first?
 10. Where should KPB-managed packages be installed?
 11. Should installation prefixes be configurable?
@@ -408,6 +446,9 @@ The following questions require explicit decisions:
 15. How should KPB detect host-owned filesystem conflicts?
 16. Should KPB generate reusable package artifacts?
 17. How should KPB handle dependency changes following host system updates?
+18. How should explicit temporary Nix bootstrap inputs be configured and recorded?
+19. How should runtime independence from Nix be validated before accepting final artifacts?
+20. What alternative can eventually replace the external initial compiler bootstrap input?
 
 Agents should not silently resolve these questions without maintainer approval.
 

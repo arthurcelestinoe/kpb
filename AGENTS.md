@@ -31,6 +31,10 @@ KPB aims to provide:
 - Integration with dependencies provided by the host distribution.
 - Host package discovery primarily through PackageKit.
 
+These are overall project goals. The initial milestone uses only project-maintained recipes and dependencies supplied by those recipes, with the temporary Nix build and bootstrap exception defined below. PackageKit host integration is deferred to a later milestone.
+
+Rust is the selected implementation language. The first functional milestone is recipe validation, resolution of a small dependency chain, and artifact production in staging, without installation into the system. The Rust edition and toolchain are not yet selected.
+
 KPB is **not intended to become a Gentoo clone** or to rebuild the entire host distribution.
 
 Avoid expanding the scope toward full distribution management unless explicitly requested.
@@ -49,7 +53,24 @@ Maintain clear separation between the following responsibilities:
 
 Do not introduce unnecessary coupling between these components.
 
-KPB's dependency resolver must remain independent from PackageKit and individual native package managers.
+KPB's dependency resolver must remain independent from Nix, PackageKit, and individual native package managers.
+
+### 3.1 Temporary Nix bootstrap
+
+Nix is approved only as a temporary source of build tools and inputs that project recipes cannot yet provide, including the initial compiler. This approval does not establish Nix as a host discovery provider or a runtime dependency provider for final packages.
+
+Agents must:
+
+- Require Nix to be already installed when needed; never install or configure it automatically. Report its absence with an actionable diagnostic.
+- Preserve user profiles, shell configuration, and host-managed packages. Downloads and writes to the Nix store and caches are allowed.
+- Expose Nix tools only to the build process, without persistent changes to the user's environment.
+- Keep recipe definitions independent of Nix. Declare temporary exceptions explicitly in bootstrap configuration; never infer Nix package names from recipe names. The configuration format is not yet selected.
+- Record each temporary Nix dependency and its justification, and replace it once a validated chain of project recipes provides the same function.
+- Validate final artifacts for runtime dependencies on Nix, including interpreters, libraries, and store paths. Do not accept a final package if runtime independence from Nix cannot be demonstrated.
+
+Do not assume that using a Nix compiler produces an artifact independent of Nix, or that a Nix development environment provides a security sandbox. Build isolation remains a separate requirement.
+
+Removing Nix is the goal, but do not claim that all external bootstrap inputs can be eliminated. The initial compiler remains an explicit requirement until an alternative is defined.
 
 ## 4. Host Distribution Integration
 
@@ -57,9 +78,11 @@ KPB's dependency resolver must remain independent from PackageKit and individual
 
 **PackageKit is the preferred integration layer for querying packages provided by the host distribution.**
 
+This applies to future host integration, outside the initial milestone. The approved temporary Nix bootstrap in section 3.1 does not change this future direction.
+
 Agents should use PackageKit instead of implementing separate integrations for APT, DNF, Pacman, Zypper, and similar package managers whenever its supported capabilities satisfy KPB's requirements.
 
-The initial integration should focus on read-only operations, including:
+The first host integration milestone should focus on read-only operations, including:
 
 - Querying installed packages.
 - Resolving package names and identifiers.
@@ -116,7 +139,9 @@ Automatic installation or removal of host-managed packages is outside the initia
 
 KPB is responsible for resolving dependencies declared by its recipes.
 
-PackageKit acts as a source of host package information, not as a replacement for KPB's dependency resolver.
+In the initial milestone, resolve dependencies through project recipes, with only the explicit temporary build and bootstrap exceptions described in section 3.1. Nix must not replace KPB's dependency resolver or provide runtime dependencies for final packages.
+
+In future host integration, PackageKit acts as a source of host package information, not as a replacement for KPB's dependency resolver.
 
 Agents must distinguish:
 
@@ -134,7 +159,17 @@ Do not assume that a package being installed means it satisfies every version, A
 
 ## 6. Build Recipes
 
-Recipes must be treated as **untrusted executable instructions**.
+Recipes use an approved single-file hybrid design inspired by Arch PKGBUILDs and BSD ports: limited metadata with Bash-like variable assignments and lists, plus shell functions for build steps. This is a KPB-specific format; do not assume compatibility with existing PKGBUILDs.
+
+Agents must:
+
+- Read and validate metadata without executing commands or sourcing the recipe as a shell script. Arbitrary shell logic and command execution are not allowed in metadata.
+- Keep build steps in shell functions, such as `prepare()`, `build()`, `check()`, and `package()`. The shell interpreter and exact function contracts remain undecided.
+- Make `package()` write to the staging directory supplied by KPB, rather than install into the host system.
+- Keep validation, dependency resolution, source acquisition and verification, and build orchestration in the Rust implementation.
+- Leave exact grammar, required fields, permitted metadata substitutions, and recipe filename open until explicitly decided. The approved design is not an implemented parser or executor.
+
+Recipes must be treated as untrusted input, and their build functions as **untrusted executable instructions**. Project-maintained recipes are subject to the same precautions.
 
 Agents must consider:
 
@@ -199,6 +234,11 @@ Important test scenarios include:
 - Interrupted installations.
 - Invalid recipes.
 - Unavailable Git repositories.
+- Missing Nix when an explicit bootstrap input requires it.
+- Preservation of user profiles, shell configuration, and host-managed packages during Nix-assisted builds.
+- Explicit declaration and recording of temporary Nix bootstrap inputs.
+- Rejection of final artifacts with Nix runtime dependencies or unverified runtime independence.
+- Replacement of a temporary Nix tool with a validated project recipe.
 - Host-provided dependencies.
 - Removal of packages required by other packages.
 - Corrupted or inconsistent package metadata.
@@ -209,6 +249,8 @@ Important test scenarios include:
 - Correct behavior when mock host providers return conflicting information.
 
 Use temporary directories, mock adapters, containers, or other isolated environments where appropriate.
+
+Host provider and PackageKit scenarios apply when host integration is introduced; they do not require implementing it in the initial milestone. The Nix scenarios above are requirements for future bootstrap implementation, not claims of existing tests.
 
 ## 10. Agent Workflow
 
