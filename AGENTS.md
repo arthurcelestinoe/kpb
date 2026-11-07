@@ -159,15 +159,18 @@ Do not assume that a package being installed means it satisfies every version, A
 
 ## 6. Build Recipes
 
-Recipes use an approved single-file hybrid design inspired by Arch PKGBUILDs and BSD ports: limited metadata with Bash-like variable assignments and lists, plus shell functions for build steps. This is a KPB-specific format; do not assume compatibility with existing PKGBUILDs.
+Read [docs/recipes.md](docs/recipes.md) before changing recipe parsing or execution. It specifies the approved initial `KPB.recipe` format: one package per file, restricted metadata followed by Bash functions, inspired by Arch PKGBUILDs and BSD ports. Do not assume compatibility with existing PKGBUILDs.
 
 Agents must:
 
 - Read and validate metadata without executing commands or sourcing the recipe as a shell script. Arbitrary shell logic and command execution are not allowed in metadata.
-- Keep build steps in shell functions, such as `prepare()`, `build()`, `check()`, and `package()`. The shell interpreter and exact function contracts remain undecided.
+- Follow the documented fields, scalar-reference substitutions, source/hash rules, and bare-name or exact-version dependency syntax. Reject unsupported syntax rather than evaluating it as shell.
+- Use Bash for optional `prepare()`, `build()`, and `check()` stages and mandatory `package()`, with each stage in a fresh process starting in `$srcdir`. Preserve workspace files, not stage-local shell state.
+- Enable `errexit` and `pipefail` for stages, respecting their documented Bash exceptions. A nonzero stage exit must stop execution and prevent acceptance of incomplete staging contents.
+- Run defined tests by default; when explicitly disabled, skip `check()` and resolution of `checkdepends`. Reject `checkdepends` without `check()`.
 - Make `package()` write to the staging directory supplied by KPB, rather than install into the host system.
 - Keep validation, dependency resolution, source acquisition and verification, and build orchestration in the Rust implementation.
-- Leave exact grammar, required fields, permitted metadata substitutions, and recipe filename open until explicitly decided. The approved design is not an implemented parser or executor.
+- Treat the specification as approved requirements, not an implemented parser or executor. Isolation mechanisms, prefix defaults, bootstrap configuration, and artifact format remain separate decisions.
 
 Recipes must be treated as untrusted input, and their build functions as **untrusted executable instructions**. Project-maintained recipes are subject to the same precautions.
 
@@ -233,6 +236,7 @@ Important test scenarios include:
 - Failed builds.
 - Interrupted installations.
 - Invalid recipes.
+- Parser and executor scenarios specified in [docs/recipes.md](docs/recipes.md#future-implementation-validation), when those components are implemented.
 - Unavailable Git repositories.
 - Missing Nix when an explicit bootstrap input requires it.
 - Preservation of user profiles, shell configuration, and host-managed packages during Nix-assisted builds.

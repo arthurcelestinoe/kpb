@@ -89,29 +89,17 @@ The letter **K** in Kobalt is a naming choice, not a requirement for KDE integra
 
 Recipes describe how software is obtained, built, and prepared for installation.
 
-The approved direction is a single-file, hybrid format inspired by Arch PKGBUILDs and BSD ports, with limited metadata and shell functions for build steps. It is a KPB-specific format; compatibility with existing PKGBUILDs is not assumed.
+The approved initial format is specified in [docs/recipes.md](docs/recipes.md). Each `KPB.recipe` describes one package using limited metadata followed by Bash functions, inspired by Arch PKGBUILDs and BSD ports. It is a KPB-specific format; compatibility with existing PKGBUILDs is not assumed.
 
-Metadata will use variable assignments and lists with Bash-like syntax, restricted so KPB can read and validate them without executing commands. Arbitrary shell logic and command execution are not permitted in metadata. Allowed substitutions remain to be defined.
+Metadata uses variable assignments and lists, with simple `${variable}` references to previously declared scalars inside double-quoted text. KPB must validate metadata without executing commands or sourcing the recipe in Bash. Required identity, description, license, architecture, sources, and SHA-256 fields, as well as optional dependency lists, are defined in the specification. Dependencies support bare names or exact upstream versions; comparisons and ranges are deferred.
 
-Shell functions will express steps such as `prepare()`, `build()`, `check()`, and `package()`. The `package()` step must write to the staging directory supplied by KPB, rather than install into the host system. Required functions, their exact contracts, and the shell interpreter remain undecided.
+KPB will obtain and verify HTTPS or recipe-local sources, then automatically extract supported tar archives. Git source checkouts are deferred; Git-based recipe repositories remain a separate feature.
 
-The Rust implementation will orchestrate metadata validation, dependency resolution, source acquisition and verification, and execution of build steps. Metadata inspection must not execute or source the recipe as a shell script. Build functions remain untrusted executable code.
+Optional `prepare()`, `build()`, and `check()` functions precede mandatory `package()`. Each stage runs in a fresh Bash process starting in `$srcdir`, with workspace files preserved. Tests run by default when defined and may be explicitly disabled along with their test-only dependencies. `package()` must write to KPB's staging directory, not install into the host system.
 
-Potential metadata and build information includes:
+The Rust implementation will orchestrate validation, dependency resolution, source acquisition and verification, and stage execution. Build functions remain untrusted executable code; Bash error options do not provide filesystem isolation or detect every failed command.
 
-- Package name and version.
-- Description and license.
-- Source URLs or Git references.
-- Source integrity information.
-- Build dependencies.
-- Runtime dependencies.
-- Version constraints.
-- Build configuration.
-- Build instructions.
-- Installation and staging instructions.
-- Optional features or build variants.
-
-The single-file hybrid model is approved, but its exact grammar, required fields, permitted substitutions, filename, and execution contracts are **not yet finalized**. No recipe parser or executor is implemented yet.
+This format and execution contract are approved requirements, not implemented functionality. No recipe parser or executor exists yet. Isolation, prefix defaults, bootstrap configuration, and artifact format remain separate decisions.
 
 The project should favor readability, maintainability, and predictable behavior.
 
@@ -152,7 +140,7 @@ The PackageKit integration will provide information that helps the KPB resolver 
 
 However, PackageKit is not responsible for resolving the complete dependency graph of KPB recipes.
 
-Dependency naming, provider mapping, version compatibility, and ABI compatibility require further design.
+The initial recipe syntax supports package names and exact `pkgver` constraints as defined in [docs/recipes.md](docs/recipes.md). Provider mapping, version ordering and ranges, and ABI compatibility require further design.
 
 Automatic installation of missing dependencies through the host package manager is not an established requirement.
 
@@ -421,7 +409,7 @@ The following future architectural direction remains established:
 
 However, this integration has not yet been validated as part of a completed KPB implementation.
 
-Rust is the selected implementation language. The approved recipe direction is the single-file hybrid format described in section 5. Neither decision is implemented yet. The Rust edition and toolchain, exact recipe syntax, database engine, installation layout, and remaining implementation architecture are still undecided.
+Rust is the selected implementation language. The approved initial recipe format and execution contract are documented in [docs/recipes.md](docs/recipes.md). Neither is implemented yet. The Rust edition and toolchain, parser implementation, database engine, installation layout, and remaining implementation architecture are still undecided.
 
 Existing source code, when available, should be examined before making implementation decisions.
 
@@ -430,10 +418,10 @@ Existing source code, when available, should be examined before making implement
 The following questions require explicit decisions:
 
 1. Which Rust edition and toolchain should KPB use?
-2. What exact recipe grammar, filename, required fields, and metadata substitutions should KPB support?
-3. Which shell interpreter and build function contracts should the approved hybrid format use?
+2. How should the restricted metadata syntax and Bash function bodies be parsed and validated safely in Rust?
+3. How should the executor implement the documented Bash stage contract under the chosen isolation mechanism?
 4. How should Git repositories organize recipes?
-5. How should dependency providers and versions be represented?
+5. How should dependency providers and future version ordering/ranges be represented beyond the initial name and exact-version syntax?
 6. How should PackageKit results be normalized?
 7. Which PackageKit capabilities are strictly required for the first host integration milestone?
 8. Should PackageKit be an optional or required runtime dependency once host integration is introduced?
