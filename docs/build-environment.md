@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-This document records the approved prefix, dependency composition, discovery environment, and isolation direction for the first functional milestone. These are requirements for a future implementation; no build environment, resolver, Bubblewrap executor, or Nix integration is implemented yet.
+This document records the approved prefix, dependency composition, discovery environment, and isolation direction for the first functional milestone. The [bootstrap flake](bootstrap-flake.md) now supplies pinned tools and checks. The build environment, resolver, Bubblewrap executor, and recipe bootstrap integration remain unimplemented requirements.
 
 The milestone builds project-maintained [recipes](recipes.md) and produces validated artifacts in staging. It does not install packages into the host, define an installed-package database, or select a packaged archive format.
 
@@ -59,7 +59,7 @@ Define the temporary Nix tool set in a version-controlled `flake.nix`, with a ve
 
 Normal builds must use the committed lock without generating or updating it. A missing lock, or a definition that requires changing it, must stop the operation rather than silently select new inputs. Lock updates are an explicit maintainer operation, reviewed with the bootstrap definition. Pinning inputs alone does not prove reproducibility, isolation, or runtime independence from Nix.
 
-The exact tool list and pinned versions, mapping and recording of recipe bootstrap exceptions, store mounts, and toolchain-specific adjustments remain separate decisions. No flake or lock is implemented yet. Nix is not a permitted runtime dependency provider for final artifacts.
+The selected nixpkgs revision and evaluated tool versions are recorded in [bootstrap-versions.md](bootstrap-versions.md). The [initial tool set](bootstrap-tools.md) distinguishes recipe build tools from orchestration tools. The root flake and generated lock implement these tool bundles and their checks; see [usage and validation](bootstrap-flake.md). Mapping and recording of recipe bootstrap exceptions, store mounts, and toolchain-specific adjustments remain separate decisions. Nix is not a permitted runtime dependency provider for final artifacts.
 
 ## Discovery environment
 
@@ -91,7 +91,7 @@ Use the KPB-built loader under `/opt/kpb/lib` and explicit ELF `DT_RUNPATH` entr
 
 Each library must account for its own dynamic dependencies rather than assume the executable's RUNPATH covers every transitive dependency. The validation sandbox must provide the KPB-built runtime and declared runtime dependencies while withholding the Nix store and undeclared host runtime libraries. Targeting C alone does not prove that compiler support libraries are absent; any required runtime component must also meet the existing ownership and Nix-independence rules.
 
-The glibc version, prerequisite recipes, exact loader filename, compiler/linker and startup-object configuration, and bootstrap input versions remain to be defined. Selecting glibc and RUNPATH does not remove those bootstrap requirements or establish a host installation layout.
+The source and patch set for the KPB glibc recipe, prerequisite recipes, exact loader filename, and compiler/linker and startup-object configuration remain to be defined. The selected bootstrap snapshot and its reference glibc are documented in [bootstrap-versions.md](bootstrap-versions.md); version screening does not validate the KPB bootstrap or establish a host installation layout.
 
 ## Isolation boundary
 
@@ -100,6 +100,8 @@ Bubblewrap is the selected basis for build isolation. The dependency tree is exp
 KPB must check effective isolation support on the host rather than only the presence of the `bwrap` command. If the required baseline cannot be established, stop with an actionable diagnostic instead of running an unprotected build. Additional protections may vary by host, but must not silently weaken this baseline.
 
 The full mount layout, per-stage permissions, namespace setup, environment allowlist, and resource limits remain to be specified. This document records the required boundary, not a complete sandbox implementation or proof of enforcement.
+
+A [reproducible validation prototype](bootstrap-sandbox.md) now tests individual read-only recipe-tool closure mounts, synthetic read-only inputs, a private writable workspace, cleared environment, and the required namespaces. It passed tool execution, network/filesystem checks, and C object compilation on the current x86_64 host. Its layout is evidence for implementing the executor, not a finalized per-stage sandbox policy.
 
 Using Nix-supplied build tools does not establish isolation or ensure that produced binaries are independent of Nix. Final artifact validation must examine runtime libraries, interpreters, loaders, and store references. Reject artifacts with Nix runtime dependencies or whose runtime independence cannot be demonstrated. Do not use inherited host paths or an automatically supplied `LD_LIBRARY_PATH` to hide missing runtime requirements.
 

@@ -2,7 +2,7 @@
 
 ## Status and scope
 
-This document specifies the approved initial recipe format. It describes requirements for a future implementation; no recipe parser, executor, source acquisition, or Nix integration is implemented yet.
+This document specifies the approved initial recipe format. It describes requirements for a future implementation; no recipe parser, executor, source acquisition, or recipe bootstrap integration is implemented yet. The separate [bootstrap flake](bootstrap-flake.md) supplies tools and checks only.
 
 A recipe is named `KPB.recipe` and describes one package. It combines a restricted metadata block with Bash functions, inspired by Arch PKGBUILDs and BSD ports. Existing PKGBUILDs are not assumed to be compatible.
 

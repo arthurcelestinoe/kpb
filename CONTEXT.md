@@ -55,9 +55,11 @@ KPB will be implemented in Rust. The first functional milestone will validate a 
 
 The [initial build environment](docs/build-environment.md) uses the fixed `/opt/kpb` prefix and a read-only dependency tree per build inside Bubblewrap. The current package writes to separate staging under `$pkgdir/opt/kpb`; this does not create or populate `/opt/kpb` on the host.
 
-glibc is the selected initial C runtime, to be built with its loader through a project-maintained recipe for a native x86_64 Linux demonstration in C. GCC and GNU Binutils will initially come from Nix; C++ packages are deferred. Use a KPB-built loader under `/opt/kpb/lib` and explicit RUNPATH to `/opt/kpb/lib` in executables and libraries that require it. No preliminary musl stage is planned, and final packages must remain independent of Nix at runtime. Versions, prerequisite recipes, the exact loader filename, and detailed toolchain settings remain undecided; see [the initial C runtime decision](docs/build-environment.md#initial-c-runtime).
+glibc is the selected initial C runtime, to be built with its loader through a project-maintained recipe for a native x86_64 Linux demonstration in C. GCC and GNU Binutils will initially come from Nix; C++ packages are deferred. Use a KPB-built loader under `/opt/kpb/lib` and explicit RUNPATH to `/opt/kpb/lib` in executables and libraries that require it. No preliminary musl stage is planned, and final packages must remain independent of Nix at runtime. The KPB glibc source and patch set, prerequisite recipes, the exact loader filename, and detailed toolchain settings remain undecided; see [the initial C runtime decision](docs/build-environment.md#initial-c-runtime).
 
-Nix is approved as a temporary source of build tools and inputs that project recipes cannot yet provide, including the initial compiler needed to bootstrap a toolchain. This is a development decision, not an implemented integration.
+Nix is approved as a temporary source of build tools and inputs that project recipes cannot yet provide, including the initial compiler needed to bootstrap a toolchain. Tool supply is implemented by the bootstrap flake below; integration into recipe execution remains unimplemented.
+
+The initial `x86_64-linux` bootstrap snapshot is nixpkgs revision `c56a87d8e41ce69bd2af57eb35dcc117a9dfca33` from the `nixos-26.05` line. [docs/bootstrap-versions.md](docs/bootstrap-versions.md) records the evaluated tool versions and checks against glibc 2.42 requirements. [docs/bootstrap-tools.md](docs/bootstrap-tools.md) selects 18 recipe build tools and seven orchestration entries, with Binutils serving both roles. The root `flake.nix` and generated `flake.lock` now implement those tool bundles, with passing Gawk precision and bundle-layout checks. [docs/bootstrap-flake.md](docs/bootstrap-flake.md) documents their use and limits. This does not select the KPB glibc source/patch set or demonstrate a working KPB package build.
 
 The temporary bootstrap must follow these rules:
 
@@ -407,7 +409,9 @@ The following initial milestone has been approved:
 
 **Use project-maintained recipes and their dependencies, with Nix supplying explicit temporary build and bootstrap inputs only, as described in section 3.1.**
 
-No build or bootstrap integration is implemented yet. This milestone does not implement PackageKit integration.
+The bootstrap flake and lock supply pinned tool bundles with executed checks. Recipe build/bootstrap integration, the resolver, and the Bubblewrap executor are not implemented yet. This milestone does not implement PackageKit integration.
+
+The synthetic host validation in [docs/bootstrap-sandbox.md](docs/bootstrap-sandbox.md) has passed on the current x86_64 host: bootstrap tools execute under Bubblewrap, required namespace/network/filesystem checks pass, and Make/GCC produce a C object in a private workspace. This harness is not a recipe executor and does not validate a KPB-built glibc or final runtime independence.
 
 The following future architectural direction remains established:
 
@@ -415,7 +419,7 @@ The following future architectural direction remains established:
 
 However, this integration has not yet been validated as part of a completed KPB implementation.
 
-Rust is the selected implementation language. The approved recipe format is documented in [docs/recipes.md](docs/recipes.md), and the prefix, dependency composition, discovery environment, and Bubblewrap direction in [docs/build-environment.md](docs/build-environment.md). These remain unimplemented requirements. The Rust edition and toolchain, parser implementation, detailed sandbox policy, bootstrap configuration, runtime validation mechanism, database engine, future host installation layout, and remaining implementation architecture are still undecided.
+Rust is the selected implementation language. The approved recipe format is documented in [docs/recipes.md](docs/recipes.md), and the prefix, dependency composition, discovery environment, and Bubblewrap direction in [docs/build-environment.md](docs/build-environment.md). Their recipe/executor implementation remains pending, while the bootstrap tool flake is implemented and checked. The Rust edition and toolchain, parser implementation, detailed sandbox policy, recipe bootstrap exception mapping, runtime validation mechanism, database engine, future host installation layout, and remaining implementation architecture are still undecided.
 
 Existing source code, when available, should be examined before making implementation decisions.
 
@@ -440,7 +444,7 @@ The following questions require explicit decisions:
 15. How should KPB detect host-owned filesystem conflicts?
 16. Should KPB generate reusable package artifacts?
 17. How should KPB handle dependency changes following host system updates?
-18. Which tools and versions should the bootstrap flake provide, and how should recipe exceptions be mapped and recorded separately from the recipes?
+18. How should recipe bootstrap exceptions be mapped and recorded separately from the recipes, using the implemented flake tool bundles?
 19. How should runtime independence from Nix be validated before accepting final artifacts?
 20. What alternative can eventually replace the external initial compiler bootstrap input?
 

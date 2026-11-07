@@ -70,6 +70,8 @@ Agents must:
 - Record each temporary Nix dependency and its justification, and replace it once a validated chain of project recipes provides the same function.
 - Validate final artifacts for runtime dependencies on Nix, including interpreters, libraries, and store paths. Do not accept a final package if runtime independence from Nix cannot be demonstrated.
 
+Maintain the implemented bootstrap flake using the snapshot in [docs/bootstrap-versions.md](docs/bootstrap-versions.md), the selected tool sets in [docs/bootstrap-tools.md](docs/bootstrap-tools.md), and the usage/checks in [docs/bootstrap-flake.md](docs/bootstrap-flake.md). Run flake checks with `--no-update-lock-file`; retain the Gawk functional precision check. Keep orchestration-only tools out of recipe PATH, without mistaking PATH selection for a security boundary. Do not expose the Nix CLI or daemon socket to recipes, and do not silently substitute a moving channel, host registry entry, overlay, or another revision. Exception mapping remains undecided; tool checks do not prove successful recipe compilation or runtime independence.
+
 Do not assume that using a Nix compiler produces an artifact independent of Nix, or that a Nix development environment provides a security sandbox. Build isolation remains a separate requirement.
 
 Removing Nix is the goal, but do not claim that all external bootstrap inputs can be eliminated. The initial compiler remains an explicit requirement until an alternative is defined.
@@ -143,7 +145,7 @@ KPB is responsible for resolving dependencies declared by its recipes.
 
 In the initial milestone, resolve dependencies through project recipes, with only the explicit temporary build and bootstrap exceptions described in section 3.1. Nix must not replace KPB's dependency resolver or provide runtime dependencies for final packages.
 
-glibc is the approved initial C runtime for a native x86_64 Linux demonstration in C, with GCC and GNU Binutils temporarily supplied by Nix. C++ packages are deferred. Follow [the runtime decision](docs/build-environment.md#initial-c-runtime): use a KPB-built loader under `/opt/kpb/lib` and explicit RUNPATH to `/opt/kpb/lib` in executables and libraries requiring it. Do not add a preliminary musl stage or use Nix/host runtime libraries as implicit substitutes. Versions, prerequisites, the exact loader filename, and detailed toolchain settings remain undecided.
+glibc is the approved initial C runtime for a native x86_64 Linux demonstration in C, with GCC and GNU Binutils temporarily supplied by Nix. C++ packages are deferred. Follow [the runtime decision](docs/build-environment.md#initial-c-runtime): use a KPB-built loader under `/opt/kpb/lib` and explicit RUNPATH to `/opt/kpb/lib` in executables and libraries requiring it. Do not add a preliminary musl stage or use Nix/host runtime libraries as implicit substitutes. The KPB glibc source and patch set, prerequisites, the exact loader filename, and detailed toolchain settings remain undecided.
 
 Compose validated direct runtime/build dependencies, enabled test dependencies, and their required transitive runtime dependencies into one read-only tree per build. Do not propagate dependencies used only to build an already completed dependency. Allow one version per package name; reject incompatible requirements and file/link/type collisions without automatic alternative builds or silent overwrites. Shared directories may be merged while retaining contributor ownership. Keep temporary bootstrap tools and current staging separate from this tree.
 
@@ -197,6 +199,8 @@ Never assume that a Git repository or recipe is trustworthy merely because it is
 Avoid executing arbitrary recipe code with elevated privileges.
 
 Bubblewrap is the selected isolation basis. Expose dependencies read-only, deny network access to recipe functions, restrict writes to workspace/staging/private temporary directories, and exclude user home contents, credentials, and session sockets. Do not expose host directories or libraries as implicit dependencies. Check effective isolation support; if the required boundary is unavailable, stop with a diagnostic instead of running without protection. Detailed mounts and per-stage permissions remain to be specified.
+
+Use the synthetic host harness documented in [docs/bootstrap-sandbox.md](docs/bootstrap-sandbox.md) to validate bootstrap tools under Bubblewrap. It is separate from Nix flake checks and is not the Rust recipe executor or a final sandbox policy. Namespace restrictions in an outer runner must be reported, not bypassed by weakening the payload's isolation or reported as a passing test.
 
 ## 7. Installation and Removal Safety
 
