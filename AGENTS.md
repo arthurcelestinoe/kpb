@@ -63,10 +63,10 @@ Nix is approved only as a temporary source of build tools and inputs that projec
 
 Agents must:
 
-- Require Nix to be already installed when needed; never install or configure it automatically. Report its absence with an actionable diagnostic.
+- Require Nix and flake support to be already available when needed; never install/configure Nix or enable flakes automatically. Report missing support with an actionable diagnostic.
 - Preserve user profiles, shell configuration, and host-managed packages. Downloads and writes to the Nix store and caches are allowed.
 - Expose Nix tools only to the build process, without persistent changes to the user's environment.
-- Keep recipe definitions independent of Nix. Declare temporary exceptions explicitly in bootstrap configuration; never infer Nix package names from recipe names. The configuration format is not yet selected.
+- Keep recipe definitions independent of Nix. Define temporary tools in version-controlled `flake.nix` and `flake.lock`; normal builds must use the committed lock without generating or updating it. Lock updates require an explicit maintainer operation. The mapping and recording of recipe bootstrap exceptions remain undecided; never infer Nix package names from recipe names.
 - Record each temporary Nix dependency and its justification, and replace it once a validated chain of project recipes provides the same function.
 - Validate final artifacts for runtime dependencies on Nix, including interpreters, libraries, and store paths. Do not accept a final package if runtime independence from Nix cannot be demonstrated.
 
@@ -142,6 +142,8 @@ Automatic installation or removal of host-managed packages is outside the initia
 KPB is responsible for resolving dependencies declared by its recipes.
 
 In the initial milestone, resolve dependencies through project recipes, with only the explicit temporary build and bootstrap exceptions described in section 3.1. Nix must not replace KPB's dependency resolver or provide runtime dependencies for final packages.
+
+glibc is the approved initial C runtime for a native x86_64 Linux demonstration in C, with GCC and GNU Binutils temporarily supplied by Nix. C++ packages are deferred. Follow [the runtime decision](docs/build-environment.md#initial-c-runtime): use a KPB-built loader under `/opt/kpb/lib` and explicit RUNPATH to `/opt/kpb/lib` in executables and libraries requiring it. Do not add a preliminary musl stage or use Nix/host runtime libraries as implicit substitutes. Versions, prerequisites, the exact loader filename, and detailed toolchain settings remain undecided.
 
 Compose validated direct runtime/build dependencies, enabled test dependencies, and their required transitive runtime dependencies into one read-only tree per build. Do not propagate dependencies used only to build an already completed dependency. Allow one version per package name; reject incompatible requirements and file/link/type collisions without automatic alternative builds or silent overwrites. Shared directories may be merged while retaining contributor ownership. Keep temporary bootstrap tools and current staging separate from this tree.
 

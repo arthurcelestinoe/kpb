@@ -55,7 +55,11 @@ Temporary Nix tools remain separate from the tree of KPB-managed packages. Decla
 
 KPB-managed tools take precedence through the discovery environment below. A missing tool must not trigger a fallback to the user's PATH or undeclared host packages. Replacing a temporary Nix input with a validated project recipe remains the intended migration path.
 
-The bootstrap configuration format, pinned inputs, exact store mounts, and toolchain-specific adjustments are still separate decisions. Nix is not a permitted runtime dependency provider for final artifacts.
+Define the temporary Nix tool set in a version-controlled `flake.nix`, with a version-controlled `flake.lock` pinning the nixpkgs revision and other inputs. Nix and flake support must already be available; KPB must not install Nix, enable experimental features, or change user/system configuration automatically. Missing support requires an actionable diagnostic before build execution.
+
+Normal builds must use the committed lock without generating or updating it. A missing lock, or a definition that requires changing it, must stop the operation rather than silently select new inputs. Lock updates are an explicit maintainer operation, reviewed with the bootstrap definition. Pinning inputs alone does not prove reproducibility, isolation, or runtime independence from Nix.
+
+The exact tool list and pinned versions, mapping and recording of recipe bootstrap exceptions, store mounts, and toolchain-specific adjustments remain separate decisions. No flake or lock is implemented yet. Nix is not a permitted runtime dependency provider for final artifacts.
 
 ## Discovery environment
 
@@ -73,7 +77,21 @@ KPB supplies the following environment for every recipe stage instead of inherit
 
 These settings facilitate discovery; they do not guarantee that every build system or compiler uses the intended paths. KPB must not expose host directories and libraries as implicit dependencies. Toolchain defaults, embedded search paths, and runtime loading require explicit treatment and validation.
 
-The prefix alone does not make a library discoverable by the runtime loader. Libraries, interpreters, and loaders required by the final result must be accounted for explicitly. The detailed compiler/linker configuration and runtime validation mechanism are not selected here.
+The prefix alone does not make a library discoverable by the runtime loader. Libraries, interpreters, and loaders required by the final result must be accounted for explicitly. The initial runtime search policy is defined below; the detailed compiler/linker configuration and runtime validation mechanism are not selected here.
+
+### Initial C runtime
+
+glibc is the selected C runtime for the initial bootstrap and dynamically linked package demonstration. Build glibc and its runtime loader through a project-maintained recipe for the `/opt/kpb` environment; do not introduce a preliminary musl-based runtime stage.
+
+Nix may supply the compiler and other temporary build tools, but the final packages must use the KPB-built runtime rather than glibc or a loader from the Nix store or an undeclared host installation. This is an approved direction, not an implemented or validated bootstrap chain.
+
+The initial target is native x86_64 Linux, and the package demonstration is limited to C. GCC and GNU Binutils will be supplied temporarily through Nix. C++ packages and provision of a KPB-built libstdc++ runtime are deferred; this does not change Rust as KPB's implementation language.
+
+Use the KPB-built loader under `/opt/kpb/lib` and explicit ELF `DT_RUNPATH` entries pointing to `/opt/kpb/lib` in executables and libraries that need this runtime search path. Apply the required linker settings explicitly in the recipes, not as automatically injected KPB flags. Do not depend on host loader configuration, a private loader cache as the initial discovery mechanism, or inherited `LD_LIBRARY_PATH`.
+
+Each library must account for its own dynamic dependencies rather than assume the executable's RUNPATH covers every transitive dependency. The validation sandbox must provide the KPB-built runtime and declared runtime dependencies while withholding the Nix store and undeclared host runtime libraries. Targeting C alone does not prove that compiler support libraries are absent; any required runtime component must also meet the existing ownership and Nix-independence rules.
+
+The glibc version, prerequisite recipes, exact loader filename, compiler/linker and startup-object configuration, and bootstrap input versions remain to be defined. Selecting glibc and RUNPATH does not remove those bootstrap requirements or establish a host installation layout.
 
 ## Isolation boundary
 
@@ -97,7 +115,10 @@ These are requirements for future tests, not tests of existing KPB functionality
 - Verify `prefix=/opt/kpb`, output under `$pkgdir/opt/kpb`, and no creation or population of the host's `/opt/kpb`.
 - Verify discovery by PATH, pkg-config, and CMake; exclude inherited user paths, flags, and runtime search settings.
 - Verify a missing declared tool fails rather than using a host tool, and that explicit bootstrap tools remain distinct from KPB-managed packages.
+- Require pre-existing Nix flake support and a committed, usable bootstrap lock; verify normal builds do not modify it, silently update inputs, or change Nix configuration.
 - Verify the required Bubblewrap boundary, diagnostics for unavailable isolation, and absence of network access from recipe functions.
 - Reject final artifacts with Nix runtime dependencies or unverified runtime independence, including cases where inherited host settings would otherwise mask missing dependencies.
+- Verify that the dynamic demonstration uses the KPB-built glibc and loader, and can run in its validation sandbox without the Nix store or undeclared host runtime libraries.
+- Verify the initial native x86_64 C target, loader placement under `/opt/kpb/lib`, and explicit RUNPATH for executables and libraries requiring it, including transitive library dependencies without a host cache or inherited `LD_LIBRARY_PATH`.
 
 The database, host installation/removal behavior, archive format, relocation support, and prefix configurability are outside this milestone. They must not be inferred from this build-time prefix and dependency layout.

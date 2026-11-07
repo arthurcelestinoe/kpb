@@ -55,14 +55,16 @@ KPB will be implemented in Rust. The first functional milestone will validate a 
 
 The [initial build environment](docs/build-environment.md) uses the fixed `/opt/kpb` prefix and a read-only dependency tree per build inside Bubblewrap. The current package writes to separate staging under `$pkgdir/opt/kpb`; this does not create or populate `/opt/kpb` on the host.
 
+glibc is the selected initial C runtime, to be built with its loader through a project-maintained recipe for a native x86_64 Linux demonstration in C. GCC and GNU Binutils will initially come from Nix; C++ packages are deferred. Use a KPB-built loader under `/opt/kpb/lib` and explicit RUNPATH to `/opt/kpb/lib` in executables and libraries that require it. No preliminary musl stage is planned, and final packages must remain independent of Nix at runtime. Versions, prerequisite recipes, the exact loader filename, and detailed toolchain settings remain undecided; see [the initial C runtime decision](docs/build-environment.md#initial-c-runtime).
+
 Nix is approved as a temporary source of build tools and inputs that project recipes cannot yet provide, including the initial compiler needed to bootstrap a toolchain. This is a development decision, not an implemented integration.
 
 The temporary bootstrap must follow these rules:
 
-- Require Nix to be already installed when needed. KPB must not install or configure it automatically, and must provide an actionable diagnostic if it is unavailable.
+- Require Nix and flake support to be already available when needed. KPB must not install or configure Nix or enable flakes automatically, and must provide an actionable diagnostic if support is unavailable.
 - Preserve user profiles, shell configuration, and host-managed packages. Downloads and writes to the Nix store and caches are permitted.
 - Make Nix-supplied tools available only to the build process, without persistent changes to the user's environment.
-- Keep recipes and KPB's dependency resolver independent of Nix. Declare exceptions explicitly in bootstrap configuration, without automatically translating recipe names into Nix package names. The configuration format remains undecided.
+- Keep recipes and KPB's dependency resolver independent of Nix. Define temporary tools using version-controlled `flake.nix` and `flake.lock`, and use the committed lock without generating or updating it during builds. Updates require an explicit maintainer operation. The mapping and recording of recipe bootstrap exceptions remain to be defined; never translate recipe names automatically into Nix package names.
 - Allow Nix dependencies only for build and bootstrap, not as runtime dependencies of final packages.
 
 Before accepting a final artifact, validate its runtime dependencies, including interpreters, libraries, and references to Nix store paths. Building with a Nix compiler does not guarantee an artifact independent of Nix. If runtime independence from Nix cannot be demonstrated, the artifact must not be accepted as a valid final package for this milestone.
@@ -438,7 +440,7 @@ The following questions require explicit decisions:
 15. How should KPB detect host-owned filesystem conflicts?
 16. Should KPB generate reusable package artifacts?
 17. How should KPB handle dependency changes following host system updates?
-18. How should explicit temporary Nix bootstrap inputs be configured and recorded?
+18. Which tools and versions should the bootstrap flake provide, and how should recipe exceptions be mapped and recorded separately from the recipes?
 19. How should runtime independence from Nix be validated before accepting final artifacts?
 20. What alternative can eventually replace the external initial compiler bootstrap input?
 
