@@ -1,0 +1,24 @@
+# Machine-local agent state and credentials (AGENTS.md stays versioned).
+/.agents/
+/.codex/
+/.aws/
+
+# Keep local configuration, caches, and experiment outputs in these directories.
+/.local/
+/.cache/
+/.env
+/.env.*
+!/.env.example
+
+# Generated Rust and Python artifacts. Cargo.lock remains versionable.
+/target/
+__pycache__/
+*.pyc
+*.pyo
+
+# Editor backups and operating-system metadata.
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db

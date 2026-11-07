@@ -1,126 +1,116 @@
-# Initial KPB build environment
+# KPB build environment
 
 ## Status and scope
 
-This document records the approved prefix, dependency composition, discovery environment, and isolation direction for the first functional milestone. The [bootstrap flake](bootstrap-flake.md) now supplies pinned tools and checks. The build environment, resolver, Bubblewrap executor, and recipe bootstrap integration remain unimplemented requirements.
+The initial milestone builds project-maintained [recipes](recipes.md), reuses explicitly validated installed host dependencies to minimize compilation, and produces validated artifacts in staging. Host-bound artifacts are permitted. The resolver, general host providers, recipe executor, and final artifact validator remain unimplemented; the [host-GCC experiment](host-dependencies.md#local-experiment) provides bounded evidence for this direction.
 
-The milestone builds project-maintained [recipes](recipes.md) and produces validated artifacts in staging. It does not install packages into the host, define an installed-package database, or select a packaged archive format.
+This milestone does not install packages into the host, define an installed-package database, or select a packaged archive format. The runtime may come from the host; KPB need not build an independent compiler, C library, or loader before building applications.
 
 ## Prefix and staging
 
-The initial prefix is fixed at `/opt/kpb`. KPB supplies `prefix=/opt/kpb` to each recipe. The prefix exists inside the build sandbox; KPB must not create or populate the host's `/opt/kpb` in this milestone.
-
-Each build has a dependency tree exposed at `/opt/kpb` and a separate staging root for the current package:
+KPB supplies the fixed `prefix=/opt/kpb` to recipes. Its own dependency tree is read-only there inside the sandbox; the current package writes under a separate `$pkgdir/opt/kpb`. This does not create or populate `/opt/kpb` on the host.
 
 ```text
 Inside the sandbox:
-  /opt/kpb/bin                 dependency tools (read-only)
-  /opt/kpb/include             dependency headers (read-only)
-  /opt/kpb/lib                 dependency libraries (read-only)
-  /opt/kpb/lib/pkgconfig       dependency metadata (read-only)
+  /opt/kpb/...                 validated KPB-managed dependencies, read-only
+  provider-approved paths     selected host tools/headers/libraries, read-only
+  controlled command dir      selected host command aliases, read-only
 
 Current package output:
   $pkgdir/opt/kpb/...          staged package files
 ```
 
-For example, a recipe configured with `--prefix="$prefix"` can stage an installation using `make DESTDIR="$pkgdir" install`, when its build system supports `DESTDIR`. It must not install directly into `/opt/kpb`. The current package's staging tree is not incorporated into its dependency tree during its own build.
+For a build system honoring `DESTDIR`, `make DESTDIR="$pkgdir" install` stages files beneath `$pkgdir/opt/kpb`; it must not install directly into the dependency prefix. Current staging is not incorporated into its own dependency tree.
 
-Artifacts are built for `/opt/kpb`. Relocation is not guaranteed, and configurable prefixes are deferred. This decision does not select a future host installation layout or a host activation mechanism for executables and libraries.
+Approved host components retain the canonical paths their interpreters, wrappers, and loaders require. Their presence does not change the installation prefix for KPB-managed files. Artifacts are bound to the selected prefix and recorded host/runtime compatibility; relocation and cross-distribution portability are not guaranteed. Configurable prefixes and future host installation/activation remain separate decisions.
 
-## Dependency composition
+## Dependency selection and composition
 
-Build the required dependencies before their consumer and compose the tree only from validated package artifacts. Preserve the inputs; composition and consumer builds must not modify those artifacts.
+Reuse compatible validated dependencies already available from installed host components or validated KPB artifacts. Build a project recipe only when its requirement is not otherwise satisfied. No persistent artifact-cache implementation is specified here.
 
-For the package being built, the tree contains:
+Resolve these requirements and their transitive dependencies before executing recipes:
 
-- Its direct `depends` and `makedepends` packages.
-- Its direct `checkdepends` packages only when `check()` is enabled and will run.
-- The transitive runtime dependencies needed by every included package, including build and test tools.
+- Direct `depends` and `makedepends`.
+- `checkdepends` only when `check()` will run.
+- Runtime components needed by selected build/test tools and target packages, including interpreters, loaders, libraries, and required toolchain resources.
 
-A package's own build-only and test-only dependencies are needed when building that package, but are not automatically carried into its consumer's tree. Dependency roles remain distinguishable even when a package is required in more than one role. Disabling tests removes test-only requirements, not packages also required through another role.
+Keep roles and providers explicit. Do not propagate dependencies used only to build a completed dependency into its consumer's tree. Disabling tests removes only test-exclusive requirements.
 
-For example, suppose `app` declares `depends=('liba')` and `makedepends=('generator')`. If `generator` needs `supportlib` at runtime, the app's build tree includes `supportlib`. If `generator` used `compiler` only to build itself, that fact alone does not add `compiler` to the app's tree.
+A provider's declared package dependencies or file list alone may not describe the complete toolchain. Account for compiler subprocesses, assemblers/linkers, plugins, specs, headers, data files, and target/runtime search paths as required by the selected operation. The fact that the compiler needs a library to execute does not automatically declare it as an application runtime dependency.
+
+### Missing requirements and diagnostics
+
+Plan the full selected graph before obtaining package sources or executing `prepare()`, `build()`, `check()`, or `package()`. If any requirement has no compatible validated installed host component, reusable validated KPB artifact, or project recipe whose own dependency graph can be satisfied, stop. Do not start a partial build or report incomplete staging as a valid artifact.
+
+Report all known unresolved requirements together, including:
+
+- Logical dependency name and requested version/constraint.
+- Build, runtime, or enabled test role.
+- Requiring package and transitive chain where applicable.
+- Candidates found and the reason they could not satisfy the requirement.
+- Whether the component is confirmed missing, incompatible, or could not be established because provider information/mapping is unavailable.
+
+For example, if `app` needs a recipe for `libexample`, and that recipe needs unavailable `bison` with no recipe of its own, report `app -> libexample -> bison`, not just that `libexample` could not be built. Keep version conflicts, cycles, ambiguous ownership, integrity failures, and unavailable isolation distinguishable from ordinary missing dependencies.
+
+The user can install the reported requirements through the host's own tools or provide suitable recipes and rerun KPB. KPB must not automatically install host packages, fetch replacement tools, enable package-manager features, or alter profiles, shell configuration, or package databases. A runtime component discovered to be unresolved during final validation also stops artifact acceptance with an actionable diagnostic.
+
+This is the required behavior for the future resolver/executor; it is not an implemented missing-dependency CLI.
 
 ### Versions, collisions, and ownership
 
-Each build tree permits one version per package name. Conflicting exact-version requirements stop resolution; KPB must not automatically build alternative dependency trees to satisfy incompatible consumers in this milestone. This is a per-tree rule, not a promise that only one version can ever exist among stored artifacts.
+Select one version/provider per logical dependency in a build graph. Conflicting exact constraints stop resolution; do not automatically construct alternative version trees. Preserve the distinction between KPB `pkgver`, native package version/revision/epoch, effective tool version, and ABI compatibility. Provider/name mapping remains explicit.
 
-Shared directories may be merged. Reject collisions between files or symbolic links, even when their contents or targets match, and reject incompatible entry types such as a file and a directory at the same path. Never silently overwrite or choose a winning package based on composition order.
+Compose validated KPB artifacts read-only at `/opt/kpb`. Merge shared directories while preserving contributor ownership; reject file, symlink, and incompatible entry-type collisions, including mount destination collisions. Never silently overwrite entries or shadow one dependency with another. Preserve input artifacts and keep current staging separate.
 
-Keep the originating package identifiable for each contributed entry, including the contributors to shared directories. This ownership information is required for composition diagnostics; its storage format and any future installed-package database remain undecided.
-
-### Temporary bootstrap inputs
-
-Temporary Nix tools remain separate from the tree of KPB-managed packages. Declare them explicitly through bootstrap configuration, not by converting recipe dependency names into Nix package names. Supply the tools and their required runtime inputs for build use without changing the user's profiles or shell configuration.
-
-KPB-managed tools take precedence through the discovery environment below. A missing tool must not trigger a fallback to the user's PATH or undeclared host packages. Replacing a temporary Nix input with a validated project recipe remains the intended migration path.
-
-Define the temporary Nix tool set in a version-controlled `flake.nix`, with a version-controlled `flake.lock` pinning the nixpkgs revision and other inputs. Nix and flake support must already be available; KPB must not install Nix, enable experimental features, or change user/system configuration automatically. Missing support requires an actionable diagnostic before build execution.
-
-Normal builds must use the committed lock without generating or updating it. A missing lock, or a definition that requires changing it, must stop the operation rather than silently select new inputs. Lock updates are an explicit maintainer operation, reviewed with the bootstrap definition. Pinning inputs alone does not prove reproducibility, isolation, or runtime independence from Nix.
-
-The selected nixpkgs revision and evaluated tool versions are recorded in [bootstrap-versions.md](bootstrap-versions.md). The [initial tool set](bootstrap-tools.md) distinguishes recipe build tools from orchestration tools. The root flake and generated lock implement these tool bundles and their checks; see [usage and validation](bootstrap-flake.md). Mapping and recording of recipe bootstrap exceptions, store mounts, and toolchain-specific adjustments remain separate decisions. Nix is not a permitted runtime dependency provider for final artifacts.
+Record the provider, package/component identity, files/canonical paths, available versions, integrity evidence, dependency roles, and transitive relationships for selected host components. Proposed provider details and experimental limits are in [host-dependencies.md](host-dependencies.md).
 
 ## Discovery environment
 
-KPB supplies the following environment for every recipe stage instead of inheriting the user's discovery settings:
+PATH can locate candidates during host discovery; it is not proof of ownership, version, integrity, or compatibility. Recipe stages receive a controlled environment after validation:
 
-| Setting | Initial behavior |
+| Setting | Behavior |
 |---|---|
 | `prefix` | `/opt/kpb` as a recipe variable. |
-| `PATH` | `/opt/kpb/bin`, followed only by tool directories explicitly supplied through bootstrap configuration. No inherited PATH entries. |
-| `PKG_CONFIG_LIBDIR` | `/opt/kpb/lib/pkgconfig:/opt/kpb/share/pkgconfig`. |
-| `PKG_CONFIG_PATH` | Unset; do not inherit the user's additional search paths. |
-| `CMAKE_PREFIX_PATH` | `/opt/kpb`. |
-| Compiler/linker flags | No automatically added flags or inherited user flags; required adjustments are explicit in the recipe. |
-| `LD_LIBRARY_PATH` | Not automatically set or inherited; any necessary recipe adjustment must be explicit. |
+| `PATH` | `/opt/kpb/bin`, then an isolated command directory containing only explicitly selected validated host commands. No inherited host PATH. |
+| `PKG_CONFIG_LIBDIR` | `/opt/kpb/lib/pkgconfig:/opt/kpb/share/pkgconfig`, plus only selected and validated host metadata locations from the dependency plan. |
+| `PKG_CONFIG_PATH` | Unset; never inherit the user's additional paths. |
+| `CMAKE_PREFIX_PATH` | `/opt/kpb`, plus only explicitly selected validated host search locations. |
+| Compiler/linker flags | No inherited user flags or globally injected flags. Necessary recipe-specific adjustments remain explicit. |
+| Compiler search overrides | Clear inherited variables such as `CPATH`, `C_INCLUDE_PATH`, `CPLUS_INCLUDE_PATH`, `COMPILER_PATH`, `LIBRARY_PATH`, and `GCC_EXEC_PREFIX`. |
+| `LD_LIBRARY_PATH` / `LD_PRELOAD` | Unset and not inherited or automatically supplied. Any recipe-specific runtime search adjustment must be explicit and validated. |
 
-These settings facilitate discovery; they do not guarantee that every build system or compiler uses the intended paths. KPB must not expose host directories and libraries as implicit dependencies. Toolchain defaults, embedded search paths, and runtime loading require explicit treatment and validation.
+Search variables do not replace filesystem isolation. Native compiler defaults can be used only where their required files are part of the approved mount plan. Do not expose all of `/usr`, `/usr/bin`, `/lib`, the Nix store, or the user's profile merely to make tools work. A selected package output can contain additional commands; read-only package exposure is not an executable allowlist.
 
-The prefix alone does not make a library discoverable by the runtime loader. Libraries, interpreters, and loaders required by the final result must be accounted for explicitly. The initial runtime search policy is defined below; the detailed compiler/linker configuration and runtime validation mechanism are not selected here.
+## Runtime and compatibility
 
-### Initial C runtime
+Host-provided runtimes, including registered Nix/NixOS components, are allowed when explicitly identified, selected, and validated. Store paths alone are not rejection criteria. KPB need not supply its own glibc, libgcc, or dynamic loader.
 
-glibc is the selected C runtime for the initial bootstrap and dynamically linked package demonstration. Build glibc and its runtime loader through a project-maintained recipe for the `/opt/kpb` environment; do not introduce a preliminary musl-based runtime stage.
+Before accepting an artifact, validate interpreters, loaders, dynamic libraries, static link contributions, runtime paths, and required transitive components against the recorded dependency plan. An executable's RUNPATH does not automatically satisfy every transitive library. Do not inherit loader configuration or expose a host cache indiscriminately; any required configuration must be explicitly approved and recorded.
 
-Nix may supply the compiler and other temporary build tools, but the final packages must use the KPB-built runtime rather than glibc or a loader from the Nix store or an undeclared host installation. This is an approved direction, not an implemented or validated bootstrap chain.
-
-The initial target is native x86_64 Linux, and the package demonstration is limited to C. GCC and GNU Binutils will be supplied temporarily through Nix. C++ packages and provision of a KPB-built libstdc++ runtime are deferred; this does not change Rust as KPB's implementation language.
-
-Use the KPB-built loader under `/opt/kpb/lib` and explicit ELF `DT_RUNPATH` entries pointing to `/opt/kpb/lib` in executables and libraries that need this runtime search path. Apply the required linker settings explicitly in the recipes, not as automatically injected KPB flags. Do not depend on host loader configuration, a private loader cache as the initial discovery mechanism, or inherited `LD_LIBRARY_PATH`.
-
-Each library must account for its own dynamic dependencies rather than assume the executable's RUNPATH covers every transitive dependency. The validation sandbox must provide the KPB-built runtime and declared runtime dependencies while withholding the Nix store and undeclared host runtime libraries. Targeting C alone does not prove that compiler support libraries are absent; any required runtime component must also meet the existing ownership and Nix-independence rules.
-
-The source and patch set for the KPB glibc recipe, prerequisite recipes, exact loader filename, and compiler/linker and startup-object configuration remain to be defined. The selected bootstrap snapshot and its reference glibc are documented in [bootstrap-versions.md](bootstrap-versions.md); version screening does not validate the KPB bootstrap or establish a host installation layout.
+Record the target architecture and relevant host/runtime/ABI requirements. Host-bound acceptance does not promise that an artifact works on another distribution, after incompatible host upgrades, or after a referenced store path is removed. The precise compatibility metadata, lifetime/snapshot strategy, and general validator remain to be implemented.
 
 ## Isolation boundary
 
-Bubblewrap is the selected basis for build isolation. The dependency tree is exposed read-only. Recipe functions run without network access, with writes restricted to the workspace, staging, and private temporary directories. User home contents, credentials, session sockets, and host packages must not become implicit build inputs.
+Bubblewrap remains mandatory. Expose source/dependency/tool inputs read-only, deny external network access to recipe functions, and restrict writes to private workspace, staging, and temporary directories. Exclude user home contents, credentials, session sockets, provider daemons/sockets, and undeclared host data. Perform provider queries and controlled source acquisition outside recipe execution.
 
-KPB must check effective isolation support on the host rather than only the presence of the `bwrap` command. If the required baseline cannot be established, stop with an actionable diagnostic instead of running an unprotected build. Additional protections may vary by host, but must not silently weaken this baseline.
+Check effective isolation, not just whether `bwrap` exists. Require the intended user/mount/PID/network/IPC/UTS boundaries, cleared environment, dropped privileges/capabilities, and read-only mounts. If the baseline is unavailable, stop with an actionable diagnostic; do not run the build without it. Additional host protections may vary.
 
-The full mount layout, per-stage permissions, namespace setup, environment allowlist, and resource limits remain to be specified. This document records the required boundary, not a complete sandbox implementation or proof of enforcement.
-
-A [reproducible validation prototype](bootstrap-sandbox.md) now tests individual read-only recipe-tool closure mounts, synthetic read-only inputs, a private writable workspace, cleared environment, and the required namespaces. It passed tool execution, network/filesystem checks, and C object compilation on the current x86_64 host. Its layout is evidence for implementing the executor, not a finalized per-stage sandbox policy.
-
-Using Nix-supplied build tools does not establish isolation or ensure that produced binaries are independent of Nix. Final artifact validation must examine runtime libraries, interpreters, loaders, and store references. Reject artifacts with Nix runtime dependencies or whose runtime independence cannot be demonstrated. Do not use inherited host paths or an automatically supplied `LD_LIBRARY_PATH` to hide missing runtime requirements.
+The full production mount layout, per-stage write permissions, environment allowlist, and resource limits remain separate decisions. The [host-tool experiment](host-dependencies.md#local-experiment) validates a bounded layout on native x86_64 NixOS; it is not the general recipe executor or a complete security policy.
 
 ## Future implementation validation
 
-These are requirements for future tests, not tests of existing KPB functionality:
+These are requirements for future tests, not claims of implemented resolver/executor behavior:
 
-- Compose direct build/runtime/test requirements and their runtime closure; do not propagate dependencies used only to build an already completed dependency.
-- With tests disabled, omit test-only requirements while retaining packages also needed for build or runtime.
-- Accept compatible requirements for one version; reject conflicting versions without automatic alternative builds.
-- Merge shared directories, preserve contributor ownership, and reject file, link, and entry-type collisions without overwriting inputs.
-- Keep the dependency tree read-only, preserve validated source artifacts, and keep current staging separate throughout the build.
-- Verify `prefix=/opt/kpb`, output under `$pkgdir/opt/kpb`, and no creation or population of the host's `/opt/kpb`.
-- Verify discovery by PATH, pkg-config, and CMake; exclude inherited user paths, flags, and runtime search settings.
-- Verify a missing declared tool fails rather than using a host tool, and that explicit bootstrap tools remain distinct from KPB-managed packages.
-- Require pre-existing Nix flake support and a committed, usable bootstrap lock; verify normal builds do not modify it, silently update inputs, or change Nix configuration.
-- Verify the required Bubblewrap boundary, diagnostics for unavailable isolation, and absence of network access from recipe functions.
-- Reject final artifacts with Nix runtime dependencies or unverified runtime independence, including cases where inherited host settings would otherwise mask missing dependencies.
-- Verify that the dynamic demonstration uses the KPB-built glibc and loader, and can run in its validation sandbox without the Nix store or undeclared host runtime libraries.
-- Verify the initial native x86_64 C target, loader placement under `/opt/kpb/lib`, and explicit RUNPATH for executables and libraries requiring it, including transitive library dependencies without a host cache or inherited `LD_LIBRARY_PATH`.
+- Reuse compatible validated installed host dependencies without unnecessary recipe builds.
+- Build an available project recipe when a requirement cannot be satisfied by already available components and its full graph is resolvable.
+- With missing direct/transitive requirements and no buildable recipes, aggregate diagnostics and stop before source acquisition or recipe execution; never install host packages automatically.
+- Distinguish confirmed absence, unavailable provider evidence, version/ABI mismatch, ownership ambiguity, integrity failure, conflicts, and cycles.
+- Include enabled test dependencies and selected tools' runtime/resource closures; omit test-only requirements when tests are disabled and build-only inputs used solely to produce completed dependencies.
+- Merge shared directories, preserve provider/ownership information, and reject version/file/link/type/mount collisions.
+- Keep dependency inputs read-only and staging separate; verify `/opt/kpb` staging without writes to the host prefix.
+- Verify controlled PATH/pkg-config/CMake discovery and removal of inherited compiler/loader search overrides.
+- Verify required Bubblewrap namespaces, nonroot execution, environment cleanup, hidden user data, blocked external networking, and failure when isolation is unavailable.
+- Accept explicitly validated host-bound runtimes, including Nix store components on Nix hosts; reject unapproved/unresolved/incompatible runtime requirements without making portability claims.
+- Record provenance and detect stale host observations; do not claim an atomic snapshot without implementing one.
 
-The database, host installation/removal behavior, archive format, relocation support, and prefix configurability are outside this milestone. They must not be inferred from this build-time prefix and dependency layout.
+The database, host installation/removal, archive format, relocation, and prefix configurability remain outside this milestone.

@@ -2,11 +2,11 @@
 
 ## Status and scope
 
-This document specifies the approved initial recipe format. It describes requirements for a future implementation; no recipe parser, executor, source acquisition, or recipe bootstrap integration is implemented yet. The separate [bootstrap flake](bootstrap-flake.md) supplies tools and checks only.
+This document specifies the approved initial recipe format. It describes requirements for a future implementation; no recipe parser, executor, resolver, or source acquisition is implemented yet.
 
 A recipe is named `KPB.recipe` and describes one package. It combines a restricted metadata block with Bash functions, inspired by Arch PKGBUILDs and BSD ports. Existing PKGBUILDs are not assumed to be compatible.
 
-The initial milestone uses project-maintained recipes and produces artifacts in staging without system installation. Nix may temporarily supply explicit build and bootstrap inputs through separate configuration, as described in [CONTEXT.md](../CONTEXT.md#31-initial-milestone-project-recipes-and-temporary-nix-bootstrap). Recipe names must not be translated automatically into Nix package names, and final artifacts must not depend on Nix at runtime.
+The initial milestone builds project-maintained recipes, reuses explicitly validated host dependencies to minimize compilation, and produces artifacts in staging without system installation. Host-bound runtimes are permitted under the [host dependency policy](host-dependencies.md); recipe names and native package names are not automatically interchangeable. If a required dependency has no compatible validated host component or buildable project recipe/artifact, stop and inform the user before obtaining sources or executing recipe functions.
 
 ## File structure and metadata syntax
 
@@ -59,9 +59,9 @@ Each dependency is a package name or a package name followed by `=` and an exact
 
 Exact matching compares `pkgver` as text, excluding `pkgrel`: `1.2` and `1.2.0` are different. A bare name imposes no version constraint. There is no version ordering, range syntax, or virtual provider syntax in this version. These declarations do not establish ABI compatibility by themselves.
 
-`depends` records runtime requirements that must also be available during the build. `makedepends` adds build-only requirements, and `checkdepends` adds requirements only when `check()` will run. Dependency roles must remain distinguishable when the same package serves multiple roles. The initial resolver uses project recipes, with explicitly configured build/bootstrap exceptions outside the recipe format.
+`depends` records runtime requirements that must also be available during the build. `makedepends` adds build-only requirements, and `checkdepends` adds requirements only when `check()` will run. Dependency roles must remain distinguishable when the same package serves multiple roles. The resolver reuses compatible validated host components or available validated recipe artifacts, and builds project recipes for unsatisfied requirements. Native provider mapping and validation are separate from recipe syntax.
 
-The [initial build environment](build-environment.md) composes these dependencies and their required runtime closure into a read-only tree at `/opt/kpb`. Build-only dependencies used to produce a completed dependency are not automatically propagated to its consumer. Each tree allows one version per name and rejects incompatible requirements and conflicting file contributions.
+The [build environment](build-environment.md) composes KPB-managed dependencies read-only at `/opt/kpb` and exposes selected host components through an explicit read-only mount plan. Build-only dependencies used to produce a completed dependency are not automatically propagated to its consumer. Allow one selected version per logical dependency and reject incompatible requirements or conflicting file contributions. Resolve the full selected graph, including transitive and enabled test requirements, before starting recipes. If it is incomplete, report each unresolved requirement, constraint, role, requiring chain, and reason; never automatically install host packages or download replacement tools.
 
 ## Sources and integrity
 
@@ -101,7 +101,7 @@ The sequence is:
 4. Run `build()` if present.
 5. Run `check()` if present and enabled.
 6. Run the required `package()` function.
-7. Validate the staged artifact, including independence from Nix at runtime, before accepting it.
+7. Validate the staged artifact and its declared runtime requirements, including approved host runtimes and host compatibility, before accepting it.
 
 | Function | Required | Responsibility |
 |---|---|---|
@@ -126,9 +126,9 @@ These options follow Bash semantics; they do not detect every failed command. In
 
 The Rust implementation orchestrates validation, dependency resolution, source acquisition and verification, and stage execution. Reading metadata never executes recipe code; stage execution still runs untrusted code, including for project-maintained recipes.
 
-`package()` must write only into staging. This is a recipe contract, not a claim that a shell process enforces filesystem confinement. Bubblewrap is the selected isolation basis, with the required boundary described in [the build environment specification](build-environment.md#isolation-boundary). Detailed mounts, per-stage permissions, and enforcement remain to be designed. Nix development environments alone do not establish a security sandbox. Builds must preserve user profiles, shell configuration, and host-managed packages.
+`package()` must write only into staging. This is a recipe contract, not a claim that a shell process enforces filesystem confinement. Bubblewrap is the selected isolation basis, with the required boundary described in [the build environment specification](build-environment.md#isolation-boundary). Detailed mounts, per-stage permissions, and enforcement remain to be designed. Availability of host tools does not establish isolation. Builds must preserve user profiles, shell configuration, and host-managed packages.
 
-Final artifact validation must examine runtime dependencies, including interpreters, libraries, and Nix store references. Using a Nix compiler does not ensure runtime independence. An artifact whose independence from Nix cannot be demonstrated is not a valid final package for the initial milestone.
+Final artifact validation must examine interpreters, loaders, libraries, static link contributions, and required paths against the selected dependency providers and recorded host compatibility. Approved host runtime dependencies, including Nix/NixOS store components, are permitted. Reject unresolved, unapproved, or incompatible runtime requirements; an artifact built against one host is not automatically portable to another distribution.
 
 ## Examples
 
@@ -148,7 +148,7 @@ _source_dir="${pkgname}-${pkgver}"
 source=("https://example.org/${_source_dir}.tar.xz")
 sha256sums=('0000000000000000000000000000000000000000000000000000000000000000')
 depends=('libexample=1.2')
-makedepends=('make')
+makedepends=('make' 'gcc' 'coreutils')
 checkdepends=('python')
 
 prepare() {
@@ -172,11 +172,11 @@ package() {
 }
 ```
 
-Both `check()` and `package()` enter `$builddir` again because they do not inherit `build()`'s working directory. If tests are explicitly disabled, `python` is not required through this recipe's `checkdepends`; the exact runtime dependency on `libexample=1.2` remains.
+Both `check()` and `package()` enter `$builddir` again because they do not inherit `build()`'s working directory. If tests are explicitly disabled, `python` is not required through this recipe's `checkdepends`; the exact runtime dependency on `libexample=1.2` remains. Tool names are illustrative logical requirements, with provider mappings determined outside recipe syntax. Real configure/build scripts may require additional declared tools; no undeclared host tools become available merely because they are installed.
 
 ### Local source without compilation
 
-Place a file named `message.txt` beside `KPB.recipe`, containing exactly `KPB example` followed by one LF newline, with no BOM or other bytes. Its SHA-256 is the value below. This example stages data only under `$pkgdir/opt/kpb`, omits all optional functions and dependencies, and performs no installation into the host.
+Place a file named `message.txt` beside `KPB.recipe`, containing exactly `KPB example` followed by one LF newline, with no BOM or other bytes. Its SHA-256 is the value below. This example stages data only under `$pkgdir/opt/kpb`, omits optional functions, declares the packaging tool dependency, and performs no installation into the host.
 
 ```bash
 pkgname=example-data
@@ -187,6 +187,7 @@ license=('CC0-1.0')
 arch=('any')
 source=('message.txt')
 sha256sums=('5232c5a0940f747ac77bb88561dc5c83dd63464c111c9b456a233c04836b1843')
+makedepends=('coreutils')
 
 package() {
     install -Dm644 "$srcdir/message.txt" \
@@ -194,7 +195,7 @@ package() {
 }
 ```
 
-The license above describes the example data. Packaging tools such as `install` must be supplied by the build environment or its explicit bootstrap configuration; their presence on the user's PATH is not a dependency-resolution guarantee.
+The license above describes the example data. Packaging tools such as `install` must be explicitly supplied by a validated host provider or a resolved recipe dependency; their presence on the user's PATH is not a dependency-resolution guarantee.
 
 ## Future implementation validation
 
@@ -209,6 +210,8 @@ These are required scenarios for a future parser and executor, not existing or e
 - Require `package()`, reject `checkdepends` without `check()`, run tests by default, and skip both test execution and test-only dependency resolution when disabled.
 - Verify fresh Bash processes and initial directories, persistence of workspace files, reset of stage-local variables/options, and availability of metadata, auxiliaries, and functions in every stage.
 - Verify stage and pipeline failures stop execution; cover conditional `errexit` exceptions rather than promising unconditional failure detection.
-- Verify staging-only packaging under the chosen isolation mechanism, preservation of the user's environment, and rejection of final artifacts with Nix runtime dependencies or unverified independence.
+- Verify staging-only packaging under Bubblewrap, preservation of the user's environment, acceptance of validated host-bound runtimes, and rejection of unresolved/unapproved/incompatible runtime components.
+- With a missing direct or transitive dependency and no buildable recipe, report the requirement/constraint/role/chain and stop before source acquisition or recipe execution, without installing host packages.
+- Reuse compatible validated host components; build recipes only for requirements not otherwise satisfied.
 
-The source format and execution contract are approved here. The fixed prefix, dependency composition, discovery settings, and Bubblewrap isolation direction are specified in [build-environment.md](build-environment.md), including additional future validation scenarios. Parser implementation, detailed sandbox policy, bootstrap configuration, runtime validation mechanism, artifact format, and executor CLI design require further implementation decisions.
+The source format and execution contract are approved here. The fixed prefix, dependency composition, discovery settings, and Bubblewrap isolation direction are specified in [build-environment.md](build-environment.md), including additional future validation scenarios. Parser implementation, detailed sandbox policy, provider mappings, runtime validation mechanism, artifact format, and executor CLI design require further implementation decisions.

@@ -31,7 +31,7 @@ KPB aims to provide:
 - Integration with dependencies provided by the host distribution.
 - Host package discovery primarily through PackageKit.
 
-These are overall project goals. The initial milestone uses only project-maintained recipes and dependencies supplied by those recipes, with the temporary Nix build and bootstrap exception defined below. PackageKit host integration is deferred to a later milestone.
+The initial milestone builds project-maintained recipes while reusing explicitly identified, compatible, validated host tools and dependencies to minimize compilation. Use project recipes for requirements the host cannot satisfy. Host-bound runtime artifacts are permitted; cross-distribution portability is not implied. If a requirement has no valid host provider or buildable recipe/artifact, stop and report it before recipe execution.
 
 Rust is the selected implementation language. The first functional milestone is recipe validation, resolution of a small dependency chain, and artifact production in staging, without installation into the system. The Rust edition and toolchain are not yet selected.
 
@@ -57,24 +57,19 @@ Do not introduce unnecessary coupling between these components.
 
 KPB's dependency resolver must remain independent from Nix, PackageKit, and individual native package managers.
 
-### 3.1 Temporary Nix bootstrap
+### 3.1 Host dependencies and minimal compilation
 
-Nix is approved only as a temporary source of build tools and inputs that project recipes cannot yet provide, including the initial compiler. This approval does not establish Nix as a host discovery provider or a runtime dependency provider for final packages.
+- Prioritize functioning applications with minimal necessary compilation. Reuse compatible validated installed host components and available validated KPB artifacts; build project recipes only for unsatisfied requirements.
+- Do not require building a private compiler, C library, runtime loader, or independent runtime to validate the first milestone.
+- Identify the owning provider/package, canonical files, package metadata, effective tool version/target, integrity evidence where available, and required transitive components. PATH is a candidate discovery mechanism, not proof of ownership or compatibility.
+- Keep recipes and the resolver independent of providers. Never assume KPB recipe names, native package names, native package versions, and effective tool versions are interchangeable.
+- Resolve the complete selected graph before obtaining package sources or executing recipe functions. If any requirement lacks a compatible validated host component or buildable project recipe/artifact, stop and report the unresolved requirements, constraints, build/runtime/test roles, requiring packages/chains, and rejection or unavailability reasons. Distinguish unsupported queries from confirmed absence, and conflicts/integrity failures from ordinary missing packages.
+- Do not automatically install host dependencies, fetch replacement tool bundles, change host profiles/shell configuration, or modify host package databases. Missing requirements must be explained to the user.
+- Make approved host dependencies available read-only through an explicit Bubblewrap mount plan. Never inherit the user's PATH, compiler flags, loader environment, home, or session sockets into recipe execution.
+- Accept validated host-bound artifacts, recording target/runtime compatibility and complete dependency provenance. An approved Nix/NixOS host runtime is permitted; a store path is not an automatic rejection reason. Do not claim relocation or cross-distribution portability.
+- Preserve Bubblewrap as mandatory isolation. Stop if the required boundary is unavailable; provider discovery and host tool availability do not replace isolation.
 
-Agents must:
-
-- Require Nix and flake support to be already available when needed; never install/configure Nix or enable flakes automatically. Report missing support with an actionable diagnostic.
-- Preserve user profiles, shell configuration, and host-managed packages. Downloads and writes to the Nix store and caches are allowed.
-- Expose Nix tools only to the build process, without persistent changes to the user's environment.
-- Keep recipe definitions independent of Nix. Define temporary tools in version-controlled `flake.nix` and `flake.lock`; normal builds must use the committed lock without generating or updating it. Lock updates require an explicit maintainer operation. The mapping and recording of recipe bootstrap exceptions remain undecided; never infer Nix package names from recipe names.
-- Record each temporary Nix dependency and its justification, and replace it once a validated chain of project recipes provides the same function.
-- Validate final artifacts for runtime dependencies on Nix, including interpreters, libraries, and store paths. Do not accept a final package if runtime independence from Nix cannot be demonstrated.
-
-Maintain the implemented bootstrap flake using the snapshot in [docs/bootstrap-versions.md](docs/bootstrap-versions.md), the selected tool sets in [docs/bootstrap-tools.md](docs/bootstrap-tools.md), and the usage/checks in [docs/bootstrap-flake.md](docs/bootstrap-flake.md). Run flake checks with `--no-update-lock-file`; retain the Gawk functional precision check. Keep orchestration-only tools out of recipe PATH, without mistaking PATH selection for a security boundary. Do not expose the Nix CLI or daemon socket to recipes, and do not silently substitute a moving channel, host registry entry, overlay, or another revision. Exception mapping remains undecided; tool checks do not prove successful recipe compilation or runtime independence.
-
-Do not assume that using a Nix compiler produces an artifact independent of Nix, or that a Nix development environment provides a security sandbox. Build isolation remains a separate requirement.
-
-Removing Nix is the goal, but do not claim that all external bootstrap inputs can be eliminated. The initial compiler remains an explicit requirement until an alternative is defined.
+Read [docs/host-dependencies.md](docs/host-dependencies.md) for the approved host dependency direction, proposed provider boundary, and experimental evidence. The NixOS GCC probe is a trusted experiment, not the Rust resolver, recipe executor, or final package acceptance implementation. Nix is required only for the Nix provider on hosts that use it; it is not a global project prerequisite.
 
 ## 4. Host Distribution Integration
 
@@ -82,11 +77,11 @@ Removing Nix is the goal, but do not claim that all external bootstrap inputs ca
 
 **PackageKit is the preferred integration layer for querying packages provided by the host distribution.**
 
-This applies to future host integration, outside the initial milestone. The approved temporary Nix bootstrap in section 3.1 does not change this future direction.
+Host integration is part of the initial milestone. Prefer PackageKit where its backend provides the required evidence; keep unsupported capabilities explicit.
 
 Agents should use PackageKit instead of implementing separate integrations for APT, DNF, Pacman, Zypper, and similar package managers whenever its supported capabilities satisfy KPB's requirements.
 
-The first host integration milestone should focus on read-only operations, including:
+Host integration must use read-only operations, including:
 
 - Querying installed packages.
 - Resolving package names and identifiers.
@@ -122,7 +117,7 @@ Direct native package manager adapters may be introduced when:
 - PackageKit cannot provide sufficient information for a particular dependency.
 - A documented compatibility or performance limitation justifies a native implementation.
 
-Such exceptions require maintainer approval.
+PackageKit, Pacman/libalpm, and Nix/NixOS are approved provider directions. Use Pacman/libalpm or Nix when needed for host ownership, integrity, or package-layout evidence; do not ask again for approval of this direction. Introducing other native adapters or changing provider policy requires maintainer approval.
 
 Do not create parallel native integrations merely as a speculative optimization.
 
@@ -143,13 +138,13 @@ Automatic installation or removal of host-managed packages is outside the initia
 
 KPB is responsible for resolving dependencies declared by its recipes.
 
-In the initial milestone, resolve dependencies through project recipes, with only the explicit temporary build and bootstrap exceptions described in section 3.1. Nix must not replace KPB's dependency resolver or provide runtime dependencies for final packages.
+Resolve initial dependencies through compatible validated host components and project recipes, minimizing builds. Complete the selected dependency graph before executing recipes; if no valid host component or buildable recipe/artifact satisfies a requirement, report it and stop. This includes transitive and enabled test dependencies.
 
-glibc is the approved initial C runtime for a native x86_64 Linux demonstration in C, with GCC and GNU Binutils temporarily supplied by Nix. C++ packages are deferred. Follow [the runtime decision](docs/build-environment.md#initial-c-runtime): use a KPB-built loader under `/opt/kpb/lib` and explicit RUNPATH to `/opt/kpb/lib` in executables and libraries requiring it. Do not add a preliminary musl stage or use Nix/host runtime libraries as implicit substitutes. The KPB glibc source and patch set, prerequisites, the exact loader filename, and detailed toolchain settings remain undecided.
+Host-provided compilers, libraries, interpreters, and runtime loaders are permitted when identified, explicitly selected, and validated. Record effective tool and package versions separately, runtime compatibility, files, and provider ownership. Do not require an independently rebuilt C runtime or reject an artifact solely because its approved runtime comes from a Nix/NixOS host.
 
-Compose validated direct runtime/build dependencies, enabled test dependencies, and their required transitive runtime dependencies into one read-only tree per build. Do not propagate dependencies used only to build an already completed dependency. Allow one version per package name; reject incompatible requirements and file/link/type collisions without automatic alternative builds or silent overwrites. Shared directories may be merged while retaining contributor ownership. Keep temporary bootstrap tools and current staging separate from this tree.
+Compose validated KPB-managed dependencies into a read-only tree, with host components separately exposed through the explicit mount plan. Do not propagate dependencies used only to build a completed dependency. Allow one selected version per logical dependency; reject conflicting requirements and file/link/type collisions. Shared directories may merge while preserving contributor ownership. Keep current staging separate from dependency inputs.
 
-In future host integration, PackageKit acts as a source of host package information, not as a replacement for KPB's dependency resolver.
+PackageKit and other host providers supply evidence; they do not replace KPB's dependency resolver.
 
 Agents must distinguish:
 
@@ -179,8 +174,8 @@ Agents must:
 - Make `package()` write to the staging directory supplied by KPB, rather than install into the host system.
 - Keep validation, dependency resolution, source acquisition and verification, and build orchestration in the Rust implementation.
 - Supply `prefix=/opt/kpb` and keep package output under `$pkgdir/opt/kpb`. Do not incorporate current staging into its own dependency tree or promise relocatable artifacts.
-- Use the discovery settings in [docs/build-environment.md](docs/build-environment.md#discovery-environment): KPB tools first, explicit bootstrap tools only, pkg-config and CMake paths under `/opt/kpb`, and no inherited user PATH or automatic compiler/linker flags or `LD_LIBRARY_PATH`.
-- Treat the specifications as approved requirements, not implemented components. Detailed Bubblewrap policy, bootstrap configuration, runtime validation, artifact format, and future host installation layout remain separate decisions.
+- Use the controlled discovery settings in [docs/build-environment.md](docs/build-environment.md#discovery-environment): KPB tools first, only explicitly selected validated host commands/search paths afterward, and no inherited user PATH, compiler/linker flags, or `LD_LIBRARY_PATH`.
+- Treat the specifications as approved requirements, not implemented components. Detailed Bubblewrap policy, provider mappings, runtime validation, artifact format, and future host installation layout remain separate decisions.
 
 Recipes must be treated as untrusted input, and their build functions as **untrusted executable instructions**. Project-maintained recipes are subject to the same precautions.
 
@@ -200,7 +195,7 @@ Avoid executing arbitrary recipe code with elevated privileges.
 
 Bubblewrap is the selected isolation basis. Expose dependencies read-only, deny network access to recipe functions, restrict writes to workspace/staging/private temporary directories, and exclude user home contents, credentials, and session sockets. Do not expose host directories or libraries as implicit dependencies. Check effective isolation support; if the required boundary is unavailable, stop with a diagnostic instead of running without protection. Detailed mounts and per-stage permissions remain to be specified.
 
-Use the synthetic host harness documented in [docs/bootstrap-sandbox.md](docs/bootstrap-sandbox.md) to validate bootstrap tools under Bubblewrap. It is separate from Nix flake checks and is not the Rust recipe executor or a final sandbox policy. Namespace restrictions in an outer runner must be reported, not bypassed by weakening the payload's isolation or reported as a passing test.
+Use the host-tool experiment documented in [docs/host-dependencies.md](docs/host-dependencies.md) as bounded evidence for host dependency discovery and Bubblewrap execution. It is not a general provider implementation, Rust recipe executor, or final sandbox policy. Report namespace restrictions without weakening the payload's isolation or claiming a passing test.
 
 ## 7. Installation and Removal Safety
 
@@ -253,11 +248,14 @@ Important test scenarios include:
 - Parser and executor scenarios specified in [docs/recipes.md](docs/recipes.md#future-implementation-validation), when those components are implemented.
 - Dependency composition, discovery, prefix, and isolation scenarios specified in [docs/build-environment.md](docs/build-environment.md#future-implementation-validation), when those components are implemented.
 - Unavailable Git repositories.
-- Missing Nix when an explicit bootstrap input requires it.
-- Preservation of user profiles, shell configuration, and host-managed packages during Nix-assisted builds.
-- Explicit declaration and recording of temporary Nix bootstrap inputs.
-- Rejection of final artifacts with Nix runtime dependencies or unverified runtime independence.
-- Replacement of a temporary Nix tool with a validated project recipe.
+- Reuse of compatible validated host dependencies without unnecessary recipe builds.
+- Missing or incompatible direct/transitive requirements with no buildable recipe: actionable diagnostics and no recipe execution.
+- A recipe exists but one of its own dependencies is unavailable: report the complete requiring chain.
+- Preservation of user profiles, shell configuration, and host-managed packages; no automatic native package installation.
+- Explicit recording of host files, provider/package identity, effective tool versions, and integrity evidence.
+- Acceptance of validated host-bound runtimes, including registered Nix host components, without claiming portability.
+- Rejection of unapproved runtime dependencies, ambiguous ownership, integrity failures, and incompatible ABI/architecture.
+- Recipe fallback when a compatible host dependency is unavailable and its full recipe graph is satisfiable.
 - Host-provided dependencies.
 - Removal of packages required by other packages.
 - Corrupted or inconsistent package metadata.
@@ -269,7 +267,7 @@ Important test scenarios include:
 
 Use temporary directories, mock adapters, containers, or other isolated environments where appropriate.
 
-Host provider and PackageKit scenarios apply when host integration is introduced; they do not require implementing it in the initial milestone. The Nix scenarios above are requirements for future bootstrap implementation, not claims of existing tests.
+These are requirements for the future implementation, not claims that the resolver, adapters, or recipe executor already exist. The host-GCC experiment covers only the bounded scenarios documented with it.
 
 ## 10. Agent Workflow
 
