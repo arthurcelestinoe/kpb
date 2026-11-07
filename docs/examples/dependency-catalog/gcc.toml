@@ -1,0 +1,42 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Draft schema example only: not an active catalog entry.
+# Probe identifiers and parameters are proposed, not implemented.
+schema_version = 1
+name = "gcc"
+kind = "tool"
+
+[requirements]
+executables = ["gcc"]
+
+[validation]
+probe = "gcc-tool-v1"
+
+[validation.parameters]
+language = "c"
+target = "native"
+
+[[mappings]]
+provider = "packagekit"
+distribution = "arch"
+architectures = ["x86_64"]
+packages = ["gcc"]
+
+# Approved Nix representation; general installed-component discovery is pending.
+[[mappings]]
+provider = "nix"
+distribution = "nixos"
+architectures = ["x86_64"]
+discovery = "installed-components"
+
+[[mappings]]
+provider = "pacman"
+distribution = "arch"
+architectures = ["x86_64"]
+packages = ["gcc"]
+
+[[mappings]]
+provider = "packagekit"
+distribution = "debian"
+release = "13"
+architectures = ["x86_64"]
+packages = ["gcc"]

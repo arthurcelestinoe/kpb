@@ -24,6 +24,56 @@ Keep these facts separate:
 
 Ownership and an intact file do not prove that a tool is safe, compatible with every recipe, or sufficient to compile/link. Tool probes and builds still need isolation. Do not execute an arbitrary PATH candidate merely to ask its version before identifying it.
 
+## Approved dependency naming and mapping
+
+Recipes declare stable KPB dependency names such as `gcc`, `make`, and `openssl`. These names belong to KPB's dependency namespace; recipes do not embed distribution-specific package identifiers or change their dependency names for each host.
+
+Each host provider maintains explicit mappings from those names to candidate installed packages and the files/components needed to satisfy the requirement. A logical dependency may require multiple native packages, for example separate development headers and runtime libraries. Native names or matching version strings alone never establish that the requirement is satisfied; do not guess a mapping merely because names resemble each other.
+
+Validation depends on the component:
+
+- For tools, establish ownership and available integrity evidence, then verify the effective tool family, version, target, and required execution components inside isolation. Keep native package versions separate from effective tool versions.
+- For libraries, establish the required development headers, link-time files, runtime libraries/loader relationships, and relevant architecture/ABI compatibility. A runtime library installed without required development files does not satisfy a build requirement.
+
+Without an explicit mapping or sufficient evidence, the host candidate does not resolve the dependency. Use an available validated KPB artifact or build the corresponding project recipe when its full graph is satisfiable; otherwise stop and report the unresolved requirement and why the host candidate could not be used. Keep integrity failures and conflicting evidence visible rather than hiding them through a silent substitution.
+
+This naming/mapping model is approved. The [catalog structure](dependency-catalog.md) is also approved: project-maintained TOML, one logical dependency per file under `catalog/dependencies/`, versioned with KPB. Entries classify tools/libraries, hold explicit provider mappings and required components, and reference KPB-implemented probes by identifier rather than arbitrary commands. Machine-specific paths, observed versions, and results remain local. Initially there are no external catalogs or automatic mapping updates. The detailed schema, concrete entries, loader, and provider implementation remain pending. The existing bare-name/exact-upstream-version recipe syntax is unchanged; this does not add virtual-provider syntax or a universal native-version comparator.
+
+## Provider and candidate selection
+
+Nix catalog mappings use [installed-component discovery](dependency-catalog.md#nix-installed-component-discovery) within explicitly selected installed profiles/system roots and their registered references, rather than conventional package-name lists. This does not authorize evaluating nixpkgs, fetching missing components, scanning the entire store, or bypassing the evidence and selection policy below. The mode is approved but its general implementation is pending.
+
+The maintainer approved the following initial policy:
+
+1. Prefer PackageKit when its installed backend supplies the minimum evidence required for the operation.
+2. Use an approved native provider when PackageKit is absent or lacks a required capability. This is capability-based fallback, not permission to bypass a failed integrity check or conflicting evidence.
+3. If providers identify the same component and the same canonical files, unify consistent evidence while preserving each provider's identity, package records, methods, and results. Similar names or version strings alone do not establish equivalence, and native package versions must not be confused with effective tool versions.
+4. If multiple distinct components are equally valid for the requirement, stop and present the candidates for explicit selection. Do not select by PATH order, catalog order, or highest version. Provider preference does not authorize arbitrary selection between distinct equally valid components.
+5. If evidence contradicts, report the conflict instead of silently preferring whichever result permits the build. Evidence unification must not erase a failed check or disagreement.
+
+An explicit user choice may select a candidate, but cannot waive the required ownership, compatibility, integrity, functional probe, or Bubblewrap checks. The selected dependency must still satisfy the recipe constraints and the full graph. An invalid candidate cannot be made valid by user preference; unresolved requirements follow the existing artifact/recipe fallback or stop policy.
+
+This policy is separate from [mapping applicability and specificity](dependency-catalog.md#host-mapping-selectors). It does not resolve equally specific ambiguous catalog mappings or make a provider available merely because a mapping names it. The selection interface, how choices are recorded/reused, and the concrete evidence-equivalence algorithm remain unimplemented and require further design.
+
+## Minimum host dependency evidence
+
+The catalog's [approved host selectors](dependency-catalog.md#host-mapping-selectors) determine mapping applicability within a provider using exact distribution `ID`, optional release `VERSION_ID`, and KPB architecture names. A matching release-specific mapping overrides a generic mapping, equal-specificity matches are ambiguous, and `ID_LIKE` does not provide automatic derivative fallback. These selectors do not replace component validation or decide precedence between providers.
+
+The maintainer approved the following minimum for accepting a host candidate:
+
+1. Identify its owning package/provider and the required canonical files/components. A name found in PATH is not sufficient.
+2. Establish compatibility: effective version and architecture/target for tools; required headers, link-time files, runtime components, and relevant compatibility for libraries. Keep package versions separate from effective component versions.
+3. Run the integrity checks offered by the provider and record their scope and result. If the provider does not offer an applicable integrity check, explicitly record that limitation; do not claim verified contents. This unsupported capability alone does not reject a candidate whose other required evidence and sandbox probe pass. A failed offered check, denied access, or unavailable verification data is not equivalent to an unsupported capability and must not be silently bypassed. An actual integrity mismatch rejects the candidate, even if it runs successfully.
+4. Pass a minimal functional probe inside Bubblewrap: execute the tool and validate the required identity/version behavior, or compile, link, and execute a small program using the selected library headers, link-time files, and runtime. Use only the explicitly selected components and the required isolation boundary.
+
+Record the probe, selected inputs, result, and any unsupported integrity checks with the dependency evidence. A probe is necessary evidence for the selected operation, not a complete test suite or proof of all ABI compatibility, safety, or portability. Concrete probe templates, detailed ABI checks, and provider-specific integrity coverage remain implementation decisions.
+
+Auxiliary tools needed by probes are declared by KPB's [probe registry](dependency-catalog.md#auxiliary-tools-belong-to-the-probe-registry). The resolver must resolve and validate them before executing the dependent probe. Catalog entries reference the probe and its accepted parameters without duplicating these internal tool requirements; unresolved auxiliary requirements follow the existing report-and-stop policy and do not authorize skipping validation.
+
+Insufficient evidence or a failed probe leaves the host dependency unresolved. Reject candidates with integrity mismatches and report why they cannot be used. Resolve through an available validated KPB artifact or a project recipe whose full graph is satisfiable; without such a solution, stop and report the dependency. Do not automatically repair or install host packages, suppress a failed check, or weaken Bubblewrap to obtain a passing result.
+
+These are approved requirements for the future resolver/providers, not implemented general validation. The existing NixOS GCC experiment covers one tool case and does not implement library probes or unsupported-integrity handling across providers.
+
 ## Proposed minimum provider boundary
 
 The following is a design sketch, not an implemented Rust trait or public API. Keep provider-specific IDs opaque to the resolver and keep D-Bus/native commands inside adapters.
@@ -40,11 +90,11 @@ HostDependencyProvider
 
 `PackageRecord` carries provider identity, native package ID, optional package name/version/architecture, and evidence provenance. `Ownership` connects the requested path, canonical file, and provider package ID; it must permit multiple results. `IntegrityRecord` identifies checked files/content roots, method, hashes where available, observation time, and result. Provider references describe declared metadata relationships; they are not automatically the complete executable or ABI closure.
 
-An `Evidence<T>` result distinguishes a known value from unsupported capability, unavailable data, denied access, missing package, ambiguity, stale observations, and integrity mismatch. Unsupported verification must not become “verified,” nor should missing version metadata be invented from a filename. The production policy for accepting weaker evidence remains a maintainer decision; the Nix experiment requires registered ownership and successful content verification.
+An `Evidence<T>` result distinguishes a known value from unsupported capability, unavailable data, denied access, missing package, ambiguity, stale observations, and integrity mismatch. Unsupported verification must not become “verified,” nor should missing version metadata be invented from a filename. Apply the [approved evidence minimum](#minimum-host-dependency-evidence): a recorded unsupported integrity capability differs from a failed or inconclusive offered check. The Nix experiment requires registered ownership and successful content verification because that provider offers the check.
 
 A separate tool inspector compares the effective version/target with an explicit tool request and prepares a `MountPlan`. Each entry records the source/destination, owner, identity/hash evidence, read-only mode, and reason for exposure. The build executor applies the plan; providers do not mount directories or install packages. The resolver decides requirements using KPB's internal representation. A disagreement between providers requires diagnosis, not a silent choice of whichever answer permits the build.
 
-This proposal does not map recipe names to native package names or extend the approved recipe version syntax. Logical tool capabilities, distribution naming, native package versions, and upstream tool versions need explicit mapping. Exact tool-version comparison is sufficient for this probe; a universal cross-provider version comparator is not proposed.
+The interface sketch does not yet implement the approved logical-name mappings or extend recipe version syntax. Providers must relate native package evidence to the requested component and its upstream version explicitly. Exact tool-version comparison is sufficient for the local probe; a universal cross-provider version comparator is not proposed.
 
 ## Provider feasibility
 
@@ -109,4 +159,4 @@ Controlled host-tool reuse is experimentally viable on this NixOS host, using al
 
 Tool execution runtime and final package runtime remain different responsibilities, but both may use explicitly selected compatible host components. Host-bound artifact acceptance is now approved. A compiler's availability still does not automatically declare every library it may select as a target runtime dependency: identify, validate, and record those components before accepting an artifact.
 
-Before production integration, decide the minimum acceptable evidence per capability; explicit logical-tool/package mappings; lifetime/snapshot strategy; minimum supported daemon/CLI versions; resource limits and finer mount exposure; artifact compatibility labels; and cache invalidation. Host headers/libraries must be explicitly selected and validated. Reproducibility records should include exact component identities/hashes, source inputs, flags, tool configuration, target/runtime identity, and controlled environment. A package version alone is insufficient, and native host runtime compatibility must not be advertised as cross-distribution portability.
+Before production integration, decide concrete tool/library probe templates and detailed ABI checks; provider-specific integrity coverage and capability detection; the detailed TOML catalog schema and concrete provider entries; lifetime/snapshot strategy; minimum supported daemon/CLI versions; resource limits and finer mount exposure; artifact compatibility labels; and cache invalidation. Host headers/libraries must be explicitly selected and validated. Reproducibility records should include exact component identities/hashes, source inputs, flags, tool configuration, target/runtime identity, and controlled environment. A package version alone is insufficient, and native host runtime compatibility must not be advertised as cross-distribution portability.

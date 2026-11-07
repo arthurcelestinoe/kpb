@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Draft schema example only: not an active catalog entry.
+# These candidate mappings illustrate the OpenSSL 3 shared-library ABI.
+schema_version = 1
+name = "openssl"
+kind = "library"
+
+[requirements]
+headers = ["openssl/ssl.h", "openssl/crypto.h"]
+link_libraries = ["ssl", "crypto"]
+runtime_sonames = ["libssl.so.3", "libcrypto.so.3"]
+
+[validation]
+probe = "openssl-shared-c-v1"
+
+[validation.parameters]
+linkage = "shared"
+
+[[mappings]]
+provider = "packagekit"
+distribution = "arch"
+architectures = ["x86_64"]
+packages = ["openssl"]
+
+[[mappings]]
+provider = "pacman"
+distribution = "arch"
+architectures = ["x86_64"]
+packages = ["openssl"]
+
+[[mappings]]
+provider = "packagekit"
+distribution = "debian"
+release = "13"
+architectures = ["x86_64"]
+packages = ["libssl-dev", "libssl3t64"]
+
+# Candidate discovery must validate compatible development/runtime outputs.
+[[mappings]]
+provider = "nix"
+distribution = "nixos"
+architectures = ["x86_64"]
+discovery = "installed-components"

@@ -61,7 +61,17 @@ Before obtaining package sources or executing recipe functions, resolve the comp
 
 Host integration uses `HostDependencyProvider`: prefer PackageKit where its backend supplies the required evidence, with Pacman/libalpm and Nix/NixOS providers where needed. Providers query installed components; Nix is an optional host provider, not a universal prerequisite. Recipe names are not automatically native package names. PATH may locate candidates during controlled discovery, but only validated and explicitly selected components enter a build.
 
+Nix catalog mappings use the approved [installed-component discovery](docs/dependency-catalog.md#nix-installed-component-discovery), `discovery = "installed-components"`, instead of native package-name lists or nixpkgs attributes. Search only explicitly selected installed profile/system roots and their registered references against the entry's executable/header/library requirements. Keep observed store paths, hashes, and origins local; do not scan the store indiscriminately, evaluate nixpkgs, download, or install missing outputs. Normal evidence, candidate selection, and Bubblewrap rules still apply. Discovery root selection and the general provider implementation remain pending.
+
+The [minimum host evidence](docs/host-dependencies.md#minimum-host-dependency-evidence) is approved: identify ownership and required files, establish tool version/architecture or library development/runtime compatibility, run offered integrity checks, and pass a minimal functional probe inside Bubblewrap. For libraries, compile, link, and execute a small program using the selected components. Explicitly record an unsupported integrity capability; a failed offered check is not an unsupported capability, and actual integrity mismatches reject the candidate. Insufficient evidence requires an available validated artifact/buildable recipe or an actionable stop. The general validator and concrete probe templates are not implemented.
+
 [docs/host-dependencies.md](docs/host-dependencies.md) records the approved direction, proposed provider boundary, and the successful NixOS host-GCC experiment. The provider interface, general resolver, recipe parser, and executor are still unimplemented; the experiment is not a production package manager.
+
+Auxiliary tools needed by validation probes are declared in KPB's [probe registry](docs/dependency-catalog.md#auxiliary-tools-belong-to-the-probe-registry), not repeated in catalog entries. The resolver validates or resolves those tools from host components, available validated artifacts, or buildable recipes before running a dependent probe. Unresolved requirements stop the operation with diagnostics. Their validation role does not automatically become an application runtime requirement. The registry and concrete tool-selection rules remain unimplemented.
+
+The [catalog host selectors](docs/dependency-catalog.md#host-mapping-selectors) are approved: exact `/etc/os-release` `ID`, optional exact `VERSION_ID`, and KPB architecture names with provider translation of native package architecture names. No automatic `ID_LIKE` fallback is allowed. Within the same provider/distribution/architecture, a matching release-specific mapping takes precedence over a generic mapping; equally specific matches require an ambiguity diagnostic. These rules do not select between providers and remain unimplemented.
+
+The separate [provider/candidate policy](docs/host-dependencies.md#provider-and-candidate-selection) prefers PackageKit when it supplies the required minimum evidence and uses approved native providers when PackageKit is absent or lacks a required capability. Unify consistent evidence for the same component and canonical files while preserving its origins. Distinct equally valid components require stopping and presenting candidates for explicit selection; do not choose by PATH order or highest version. Report contradictions, and never use provider fallback or user choice to bypass validation or a failed integrity check. The selection interface and evidence-equivalence algorithm remain unimplemented.
 
 ### 4. What KPB Is Not
 
@@ -132,7 +142,7 @@ Host providers, including PackageKit when supported, supply evidence that helps 
 
 However, PackageKit is not responsible for resolving the complete dependency graph of KPB recipes.
 
-The initial recipe syntax supports package names and exact `pkgver` constraints as defined in [docs/recipes.md](docs/recipes.md). Provider mapping, version ordering and ranges, and ABI compatibility require further design.
+The initial recipe syntax supports stable KPB dependency names and exact `pkgver` constraints as defined in [docs/recipes.md](docs/recipes.md). Each provider maintains explicit mappings to native packages and required files. Tools require effective-version validation; libraries also require headers, link-time files, runtime components, and compatibility evidence. Missing mappings or insufficient evidence leave a host requirement unresolved, triggering recipe/artifact resolution or an actionable stop. The [mapping model](docs/host-dependencies.md#approved-dependency-naming-and-mapping) and [catalog structure](docs/dependency-catalog.md) are approved. Use project-maintained TOML files under `catalog/dependencies/`, one per logical dependency, versioned with KPB. Entries classify tools/libraries, map provider packages/files, and reference KPB-implemented probes by identifier; no arbitrary commands, external catalogs, or automatic mapping updates. Machine-specific discoveries remain local. The detailed TOML schema, concrete entries, loader, probe registry, version ordering/ranges, and detailed ABI checks remain pending.
 
 For each build, select direct runtime/build dependencies, enabled test dependencies, and their required transitive runtime components. Compose KPB-managed artifacts read-only at `/opt/kpb` and expose approved host components through an explicit read-only mount plan. Do not automatically carry over dependencies used only to build a completed package. Allow one selected version per logical dependency, reject incompatible requirements and file contributions, and preserve provider/ownership information. Keep current staging separate and use the controlled discovery environment in [docs/build-environment.md](docs/build-environment.md). If resolution remains incomplete, report the unresolved requirements and stop before recipe execution.
 
@@ -404,7 +414,7 @@ The following questions require explicit decisions:
 5. How should dependency providers and future version ordering/ranges be represented beyond the initial name and exact-version syntax?
 6. How should PackageKit results be normalized?
 7. Which PackageKit capabilities are strictly required for the first host integration milestone?
-8. What provider capabilities and evidence are mandatory on each supported host?
+8. How should providers detect and report integrity-check coverage and evidence states under the approved minimum?
 9. Which host provider/distribution should be validated after the existing NixOS experiment?
 10. What future host installation layout should be used for artifacts initially built for `/opt/kpb`?
 11. How should future prefix configurability work beyond the fixed initial `/opt/kpb` prefix?
@@ -414,7 +424,7 @@ The following questions require explicit decisions:
 15. How should KPB detect host-owned filesystem conflicts?
 16. Should KPB generate reusable package artifacts?
 17. How should KPB handle dependency changes following host system updates?
-18. How should logical recipe requirements map to provider package identities and effective tool versions?
+18. What detailed TOML schema, concrete mappings, and probe identifiers should implement the approved catalog structure?
 19. How should runtime compatibility and complete dependency provenance be validated for host-bound artifacts?
 20. How should host dependency snapshots/lifetimes and package updates invalidate previously validated inputs and artifacts?
 

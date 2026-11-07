@@ -36,6 +36,8 @@ Resolve these requirements and their transitive dependencies before executing re
 
 Keep roles and providers explicit. Do not propagate dependencies used only to build a completed dependency into its consumer's tree. Disabling tests removes only test-exclusive requirements.
 
+Include auxiliary tool requirements declared by KPB's [probe registry](dependency-catalog.md#auxiliary-tools-belong-to-the-probe-registry) in validation planning. Resolve and validate them before running their dependent probes, using host components or available validated artifacts/buildable recipes. If they cannot be satisfied, report the validation requirement and stop. These tools are not automatically application runtime dependencies, and catalog entries do not redeclare them.
+
 A provider's declared package dependencies or file list alone may not describe the complete toolchain. Account for compiler subprocesses, assemblers/linkers, plugins, specs, headers, data files, and target/runtime search paths as required by the selected operation. The fact that the compiler needs a library to execute does not automatically declare it as an application runtime dependency.
 
 ### Missing requirements and diagnostics
@@ -58,11 +60,15 @@ This is the required behavior for the future resolver/executor; it is not an imp
 
 ### Versions, collisions, and ownership
 
+Apply the [provider/candidate selection policy](host-dependencies.md#provider-and-candidate-selection) while planning dependencies: prefer capable PackageKit, use approved native providers when needed, and unify consistent evidence only for the same component/files with origins retained. If distinct candidates are equally valid, stop for explicit user selection; report contradictions and never bypass validation. Do not use PATH order, catalog order, or highest version as an implicit tie-breaker. This does not override catalog mapping ambiguity diagnostics.
+
 Select one version/provider per logical dependency in a build graph. Conflicting exact constraints stop resolution; do not automatically construct alternative version trees. Preserve the distinction between KPB `pkgver`, native package version/revision/epoch, effective tool version, and ABI compatibility. Provider/name mapping remains explicit.
 
 Compose validated KPB artifacts read-only at `/opt/kpb`. Merge shared directories while preserving contributor ownership; reject file, symlink, and incompatible entry-type collisions, including mount destination collisions. Never silently overwrite entries or shadow one dependency with another. Preserve input artifacts and keep current staging separate.
 
 Record the provider, package/component identity, files/canonical paths, available versions, integrity evidence, dependency roles, and transitive relationships for selected host components. Proposed provider details and experimental limits are in [host-dependencies.md](host-dependencies.md).
+
+Apply [the minimum host evidence](host-dependencies.md#minimum-host-dependency-evidence) before selecting a host candidate: ownership/files, compatibility, provider-offered integrity checks, and a functional probe in Bubblewrap. Tools must execute with the required effective identity/version; library probes must compile, link, and execute against the selected development/runtime components. Record unavailable integrity functionality explicitly; actual content mismatches reject the candidate, and failed offered checks must not be relabeled as unsupported. Without enough evidence, use a validated artifact/buildable recipe or report the unresolved requirement and stop.
 
 ## Discovery environment
 
@@ -102,9 +108,14 @@ The full production mount layout, per-stage write permissions, environment allow
 These are requirements for future tests, not claims of implemented resolver/executor behavior:
 
 - Reuse compatible validated installed host dependencies without unnecessary recipe builds.
+- Require known ownership/files, compatible tool identity/version/architecture or library development/runtime components, offered integrity checks, and successful functional probes inside Bubblewrap.
+- Record unsupported integrity capabilities without claiming verified contents; never treat denied/inconclusive/failed offered checks as unsupported. Reject content mismatches even when a functional probe succeeds.
+- Exercise tool execution and library compile/link/run probes using only selected inputs. If evidence is insufficient or a probe fails, use a viable recipe/artifact or stop with diagnostics; never weaken isolation.
 - Build an available project recipe when a requirement cannot be satisfied by already available components and its full graph is resolvable.
 - With missing direct/transitive requirements and no buildable recipes, aggregate diagnostics and stop before source acquisition or recipe execution; never install host packages automatically.
 - Distinguish confirmed absence, unavailable provider evidence, version/ABI mismatch, ownership ambiguity, integrity failure, conflicts, and cycles.
+- Prefer PackageKit when sufficient; use approved native providers for missing required capabilities. Preserve origins when unifying evidence for the same component/files, and diagnose conflicting evidence without suppressing failed checks.
+- With distinct equally valid candidates, stop and present them for explicit selection. Verify selection cannot waive validation or resolve the tie implicitly through PATH/catalog order or highest version.
 - Include enabled test dependencies and selected tools' runtime/resource closures; omit test-only requirements when tests are disabled and build-only inputs used solely to produce completed dependencies.
 - Merge shared directories, preserve provider/ownership information, and reject version/file/link/type/mount collisions.
 - Keep dependency inputs read-only and staging separate; verify `/opt/kpb` staging without writes to the host prefix.
