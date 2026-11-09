@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-# Draft schema example only: not an active catalog entry.
-# Probe identifiers and parameters are proposed, not implemented.
+# Schema example only: not an active catalog entry.
+# Probe identifiers and parameters are approved contracts, not implemented.
 schema_version = 1
 name = "gcc"
 kind = "tool"
